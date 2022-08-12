@@ -1,12 +1,13 @@
 <?xml version="1.0" ?>
 <sdf version="1.5">
 	<model name="My_Agent">
-	<pose> 0 0 0.05 0 0 0</pose>
+	<pose> 0 0 0.08 0 0 0</pose>
 	<link name="chassis">
 		<collision name="chassis_collision">
+		<mass> 1 </mass>
 		<geometry>
 			<box>
-				<size>0.07 0.1 0.025</size>
+				<size> 0.25 0.18 0.04 </size>
 			</box>
 		</geometry>
 		</collision>
@@ -14,7 +15,7 @@
 		<visual name="chassis_visual">
 		<geometry>
 			<box>
-				<size>0.07 0.1 0.025</size>
+				<size> 0.25 0.20 0.04 </size>
 			</box>
 		</geometry>
 		</visual>	
@@ -22,98 +23,89 @@
 
 	<static> false </static>
 	
-	<link name="front_right_wheel">
-        <pose> 0.045 0.045 0 0 1.5707 0 </pose>
+	<link name="front_left_wheel">
+        <pose> 0.120 0.11 0 0 1.5707 1.5707 </pose>
         <collision name="collision">
           <geometry>
             <cylinder>
-              <radius>.03</radius>
-              <length>.015</length>
+              <radius>.06</radius>
+              <length>.02</length>
             </cylinder>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
             <cylinder>
-              <radius>.03</radius>
-              <length>.015</length>
+              <radius>.06</radius>
+              <length>.02</length>
             </cylinder>
           </geometry>
         </visual>
     </link>
 	
-	<link name="front_left_wheel">
-        <pose> -0.045 0.045 0 0 1.5707 0 </pose>
+	<link name="rear_left_wheel">
+        <pose> -0.120 0.11 0 0 1.5707 1.5707 </pose>
         <collision name="collision">
           <geometry>
             <cylinder>
-              <radius>.03</radius>
-              <length>.015</length>
+              <radius>.06</radius>
+              <length>.02</length>
             </cylinder>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
             <cylinder>
-              <radius>.03</radius>
-              <length>.015</length>
+              <radius>.06</radius>
+              <length>.02</length>
             </cylinder>
           </geometry>
         </visual>
     </link>
   
-	<link name="rear_right_wheel">
-        <pose> 0.045 -0.045 0 0 1.5707 0 </pose>
+	<link name="front_right_wheel">
+        <pose> 0.120 -0.11 0 0 1.5707 1.5707 </pose>
         <collision name="collision">
           <geometry>
             <cylinder>
-              <radius>.03</radius>
-              <length>.015</length>
+              <radius>.06</radius>
+              <length>.02</length>
             </cylinder>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
             <cylinder>
-              <radius>.03</radius>
-              <length>.015</length>
+              <radius>.06</radius>
+              <length>.02</length>
             </cylinder>
           </geometry>
         </visual>
 	</link>
 	
-	<link name="rear_left_wheel">
-        <pose> -0.045 -0.045 0 0 1.5707 0 </pose>
+	<link name="rear_right_wheel">
+        <pose> -0.120 -0.11 0 0 1.5707 1.5707 </pose>
         <collision name="collision">
           <geometry>
             <cylinder>
-              <radius>.03</radius>
-              <length>.015</length>
+              <radius>.06</radius>
+              <length>.02</length>
             </cylinder>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
             <cylinder>
-              <radius>.03</radius>
-              <length>.015</length>
+              <radius>.06</radius>
+              <length>.02</length>
             </cylinder>
           </geometry>
         </visual>
     </link>
 	
 	<!-- Motion Joints -->
-	<joint type="revolute" name="front_right_wheel_hinge">
-        <pose>0 0 -0.0175 0 0 0</pose>
-        <child>front_right_wheel</child>
-        <parent>chassis</parent>
-        <axis>
-          <xyz>0 0 1</xyz>
-        </axis>
-	</joint>
-	
 	<joint type="revolute" name="front_left_wheel_hinge">
-        <pose>0 0 0.0175 0 0 0</pose>
+        <pose>0 0 -0.0175 0 0 0</pose>
         <child>front_left_wheel</child>
         <parent>chassis</parent>
         <axis>
@@ -121,18 +113,27 @@
         </axis>
 	</joint>
 	
-	<joint type="revolute" name="rear_right_wheel_hinge">
+	<joint type="revolute" name="rear_left_wheel_hinge">
         <pose>0 0 -0.0175 0 0 0</pose>
-        <child>rear_right_wheel</child>
+        <child>rear_left_wheel</child>
+        <parent>chassis</parent>
+        <axis>
+          <xyz>0 0 1</xyz>
+        </axis>
+	</joint>
+	
+	<joint type="revolute" name="front_right_wheel_hinge">
+        <pose>0 0 0.0175 0 0 0</pose>
+        <child>front_right_wheel</child>
         <parent>chassis</parent>
         <axis>
           <xyz>0 0 1</xyz>
         </axis>
 	</joint>
 
-	<joint type="revolute" name="rear_left_wheel_hinge">
+	<joint type="revolute" name="rear_right_wheel_hinge">
         <pose>0 0 0.0175 0 0 0</pose>
-        <child>rear_left_wheel</child>
+        <child>rear_right_wheel</child>
         <parent>chassis</parent>
         <axis>
           <xyz>0 0 1</xyz>
@@ -141,18 +142,18 @@
 	
 	<!-- Make base for Lidar sensor -->
 	<link name="Lidar_Base">
-		<pose> 0 0 0.02125 0 0 0 </pose>
+		<pose> 0 0 0.04 0 0 0 </pose>
 		<collision name="Lidar Base collision">
 			<geometry>
 				<box>
-					<size> 0.04 0.04 0.0175 </size>
+					<size> 0.08 0.08 0.04 </size>
 				</box>
 			</geometry>
 		</collision>
 		<visual name="Lidar_base_visual">
 			<geometry>
 				<box>
-					<size> 0.04 0.04 0.0175 </size>
+					<size> 0.08 0.08 0.04 </size>
 				</box>
 			</geometry>
 		</visual>
@@ -167,7 +168,7 @@
 	<!-- Add Lidar sensor -->
 	<include>
 		<uri> model://MyLidar </uri>
-		<pose> 0 0 0.015 0 0 0</pose>
+		<pose> 0 0 0.04 0 0 0</pose>
 	</include>
 
 	<joint name="lidar_joint" type="fixed">
@@ -175,6 +176,17 @@
 		<child>My_Lidar::body</child>
 		<parent>Lidar_Base</parent>
 	</joint>
+	
+	<!-- Velocity Control Plugin -->
+	<plugin name="Control_Plugin" filename="libgazebo_ros_skid_steer_drive.so">
+		<torque>2.0</torque>
+		<leftFrontJoint> front_left_wheel_hinge </leftFrontJoint>
+		<rightFrontJoint> front_right_wheel_hinge </rightFrontJoint>
+		<leftRearJoint> rear_left_wheel_hinge </leftRearJoint>
+		<rightRearJoint> rear_right_wheel_hinge </rightRearJoint>
+		<commandTopic> /My_Agent/vel </commandTopic>
+		<robotBaseFrame> chassis </robotBaseFrame>
+	</plugin>
 
 	</model>
 </sdf>
