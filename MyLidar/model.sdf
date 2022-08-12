@@ -1,0 +1,65 @@
+<?xml version="1.0" ?>
+<sdf version="1.5">
+	<model name="My_Lidar">
+	<link name="body">
+		<pose> 0 0 0.03 0 0 0</pose>
+		<collision name="body_collision">
+		<geometry>
+			<cylinder>
+				<radius>.02</radius>
+          		<length>.03</length>
+			</cylinder>
+		</geometry>
+		</collision>
+
+		<visual name="body_visual">
+		<geometry>
+			<cylinder>
+				<radius>.02</radius>
+          		<length>.03</length>
+			</cylinder>
+		</geometry>
+		</visual>
+	
+	<!-- Copy paste of Velodyne Sensor -->
+	<inertial>
+      <mass>1.2</mass>
+      <inertia>
+        <ixx>0.001087473</ixx>
+        <iyy>0.001087473</iyy>
+        <izz>0.001092437</izz>
+        <ixy>0</ixy>
+        <ixz>0</ixz>
+        <iyz>0</iyz>
+      </inertia>
+    </inertial>
+
+	<!-- This is the ray sensor -->
+	<sensor name="Lidar" type="ray">
+		<pose>0 0 0 0 0 0</pose>
+		<visualize> false </visualize>
+		<update_rate>30</update_rate>
+		<ray>
+		  <scan>
+			<horizontal>
+			  <samples> 360 </samples>
+			  <resolution> 1 </resolution>
+			  <min_angle> -3.14 </min_angle>
+			  <max_angle> 3.14 </max_angle>
+			</horizontal>
+		  </scan>
+		  <range>
+			  <min> 0.021 </min>  <!-- Equal to radius to avoid self detection -->
+			  <max> 5 </max>
+			  <resolution> 20 </resolution>
+	  	  </range>
+	  	</ray>
+		<plugin name="Imported_plugin" filename="libgazebo_ros_laser.so">
+			<topicName> /MyLidar/ScanResults </topicName>
+			<frameName> body </frameName>
+		</plugin>
+	</sensor>
+		
+	</link>
+	</model>
+</sdf>
