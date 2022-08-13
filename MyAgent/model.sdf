@@ -166,17 +166,59 @@
 	</joint>
 
 	<!-- Add Lidar sensor -->
-	<include>
-		<uri> model://MyLidar </uri>
-		<pose> 0 0 0.04 0 0 0</pose>
-	</include>
+	<link name="lidar">
+		<pose> 0 0 0.075 0 0 0</pose>
+		<collision name="lidar_collision">
+		<geometry>
+			<cylinder>
+				<radius>.02</radius>
+          		<length>.03</length>
+			</cylinder>
+		</geometry>
+		</collision>
+
+		<visual name="lidar_visual">
+		<geometry>
+			<cylinder>
+				<radius>.02</radius>
+          		<length>.03</length>
+			</cylinder>
+		</geometry>
+		</visual>
+	
+    <!-- This is the ray sensor -->
+	<sensor name="Lidar" type="ray">
+		<pose>0 0 0 0 0 0</pose>
+        <visualize> false </visualize>
+		<update_rate>30</update_rate>
+		<ray>
+		  <scan>
+			<horizontal>
+			  <samples> 360 </samples>
+			  <resolution> 1 </resolution>
+			  <min_angle> -3.14 </min_angle>
+			  <max_angle> 3.14 </max_angle>
+			</horizontal>
+		  </scan>
+		  <range>
+			  <min> 0.021 </min>
+			  <max> 5 </max>
+			  <resolution> 20 </resolution>
+	  	  </range>
+	  	</ray>
+		<plugin name="Imported_plugin" filename="libgazebo_ros_laser.so">
+            <topicName> My_Agent/ScanResults </topicName>
+            <frameName> lidar </frameName>
+		</plugin>
+        </sensor>
+    </link>
 
 	<joint name="lidar_joint" type="fixed">
-		<pose> 0 0 -0.015 0 0 0 </pose>
-		<child>My_Lidar::body</child>
-		<parent>Lidar_Base</parent>
+		<pose> 0 0 0.03 0 0 0 </pose>
+		<child> lidar </child>
+		<parent> Lidar_Base </parent>
 	</joint>
-	
+
 	<!-- Velocity Control Plugin -->
 	<plugin name="Control_Plugin" filename="libgazebo_ros_skid_steer_drive.so">
 		<torque>2.0</torque>
