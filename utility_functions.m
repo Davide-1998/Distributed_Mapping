@@ -12,6 +12,9 @@ classdef utility_functions
                     'NodeHost', matlab_ip, ...
                     'NodeName', '/Matlab_node')
         end
+        function dist = state_distance(pose_a, pose_b)
+            dist = norm(pose_a(1:2) - pose_b(1:2));
+        end
 
         function sub = subscriber_to_topic(topicname)
             sub = rossubscriber(topicname, "DataFormat", "struct");

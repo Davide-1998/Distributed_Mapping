@@ -89,7 +89,7 @@ classdef agent
             end
 
         end
-        function [] = compute_roadmap(obj)
+        function [pthObj, solnInfo] = compute_roadmap(obj)
             % Take last reading
             [scans, poses] = scansAndPoses(obj.slam_builder);
             occMap = buildMap(scans, poses, 20, 5);
@@ -131,12 +131,37 @@ classdef agent
             
             rng(100, 'twister')
             [pthObj, solnInfo] = plan(planner, start_state, next_state);
-            pthObj;
+        end
+        function [] = execute_maneuvers(obj, path, roadmap)
+            sampling_time = 0.5;
+            if numel(path.States) == 0
+                pause(sampling_time);
+                return;
+            end
+            % A path input is made of X Y and Rotation
+            controller = controllerPurePursuit;
+            controller.Waypoints = path.States(:, 1:2);
+            controller.LookaheadDistance = 0.5;
+            
+            current_pose = path.States(1, :);
+            goal_pose = path.States(end, :);
 
-            % map = scans(end);
-            % prob_occupied_map = binaryOccupancyMap(map/255);
-            % prob_occupied_map.setOccupancy(map/255);
-            % inflate(prob_occupied_map, 0.5);
+            goal_th = 0.4;  % Same as maximum connection distance
+            
+            dist = utility_functions.state_distance(current_pose, ...
+                                                    goal_pose);
+            k = 1;
+            while dist < goal_th
+                [new_v, new_a] = controller(current_pose);
+                obj.set_velocity([new_v 0 0], [new_a 0 0]);
+                
+                pause(sampling_time);
+
+                k = k+1;
+                current_pose = path.States(k, :);
+                dist = utility_functions.state_distance(current_pose, ...
+                                                        goal_pose);
+            end
         end
         function [] = do_slam(obj, iterations, vel, correction_angle)
             if ~exist("iterations", "var")
@@ -153,11 +178,13 @@ classdef agent
             k = 1;
             while true && k < iterations
                 obj = obj.compute_map(correction_angle);
-                if mod(k, 10)
-                    obj.set_velocity(vel/10);
-                    obj.compute_roadmap();
-                    obj.set_velocity(vel);
-                end
+                [path, roadmap] = obj.compute_roadmap();
+                obj.execute_maneuvers(path, roadmap);
+                % if mod(k, 10)
+                %     obj.set_velocity(vel/10);
+                %     obj.compute_roadmap();
+                %     obj.set_velocity(vel);
+                % end
                 k = k+1;
             end
             % [scan, poses] = scansAndPoses(obj.slam_builder);
