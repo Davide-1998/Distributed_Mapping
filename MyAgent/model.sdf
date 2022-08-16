@@ -219,16 +219,29 @@
 		<parent> Lidar_Base </parent>
 	</joint>
 
-	<!-- Velocity Control Plugin -->
+    <!-- Velocity Control Plugin -->
 	<plugin name="Control_Plugin" filename="libgazebo_ros_skid_steer_drive.so">
-		<torque>2.0</torque>
+		<torque>5.0</torque>
 		<leftFrontJoint> front_left_wheel_hinge </leftFrontJoint>
 		<rightFrontJoint> front_right_wheel_hinge </rightFrontJoint>
 		<leftRearJoint> rear_left_wheel_hinge </leftRearJoint>
 		<rightRearJoint> rear_right_wheel_hinge </rightRearJoint>
+        <commandTopic> /My_Agent/vel </commandTopic>
+        <wheelDiameter> 1.2 </wheelDiameter>
+        <wheelSeparation> 0.24 </wheelSeparation>
+        <robotBaseFrame> chassis </robotBaseFrame>
+        <wheelSpeed> 1 1 1 1 </wheelSpeed>
+    </plugin>
+
+    <!-- 
+	<plugin name="Control_Plugin" filename="libgazebo_ros_diff_drive.so">
+		<torque>2.0</torque>
+		<leftJoint> front_left_wheel_hinge </leftJoint>
+		<rightJoint> front_right_wheel_hinge </rightJoint>
 		<commandTopic> /My_Agent/vel </commandTopic>
-		<robotBaseFrame> chassis </robotBaseFrame>
+        <robotBaseFrame> chassis </robotBaseFrame>
 	</plugin>
+    -->
 
 	</model>
 </sdf>
