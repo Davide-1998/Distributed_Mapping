@@ -93,7 +93,8 @@ classdef agent
             % Take last reading
             [scans, poses] = scansAndPoses(obj.slam_builder);
             occMap = buildMap(scans, poses, 20, 5);
-            occMap.FreeThreshold = 0.65;
+            inflate(occMap, 0.1);
+            occMap.FreeThreshold = 0.49;
             
             % Generate search space and node validator
             now_pose = obj.current_relative_pose;
@@ -103,6 +104,15 @@ classdef agent
             high_bound_y = now_pose(2) + obj.slam_builder.MaxLidarRange;
             low_bound_rot = now_pose(3) - (pi/2);
             high_bound_rot = now_pose(3) + (pi/2);
+            %{
+            disp("Robot bounds")
+            low_bound_x
+            high_bound_x
+            low_bound_y
+            high_bound_y
+            low_bound_rot
+            high_bound_rot
+            %}
 
             space = stateSpaceSE2([low_bound_x high_bound_x; ...
                                    low_bound_y high_bound_y; ...
@@ -112,9 +122,9 @@ classdef agent
 
             % set up planner
             planner = plannerRRTStar(space, validator);
-            planner.BallRadiusConstant = 0.4;
-            planner.MaxNumTreeNodes = 200;
-            planner.MaxConnectionDistance = 0.4;
+            planner.BallRadiusConstant = 0.4; % same?
+            planner.MaxNumTreeNodes = 100;  % Make it adaptive?
+            planner.MaxConnectionDistance = 0.4; % same?
             planner.ContinueAfterGoalReached = true;
 
             % Randomly sample next location to look up
@@ -131,17 +141,23 @@ classdef agent
             
             rng(100, 'twister')
             [pthObj, solnInfo] = plan(planner, start_state, next_state);
+
+            %{
+            figure;
+            show(occMap);
+            hold on;
+            plot(solnInfo.TreeData(:,1),solnInfo.TreeData(:,2), '.-');
+            %}
         end
-        function [] = execute_maneuvers(obj, path, roadmap)
-            sampling_time = 0.5;
-            if numel(path.States) == 0
-                pause(sampling_time);
-                return;
-            end
+        function obj = execute_maneuvers(obj, path, roadmap)
             % A path input is made of X Y and Rotation
             controller = controllerPurePursuit;
             controller.Waypoints = path.States(:, 1:2);
-            controller.LookaheadDistance = 0.5;
+            
+            % controller.DesiredLinearVelocity = 0.8;
+            % controller.MaxAngularVelocity = 1;
+            % controller.LookaheadDistance = 1.2;
+
             
             current_pose = path.States(1, :);
             goal_pose = path.States(end, :);
@@ -151,13 +167,22 @@ classdef agent
             dist = utility_functions.state_distance(current_pose, ...
                                                     goal_pose);
             k = 1;
-            while dist < goal_th
-                [new_v, new_a] = controller(current_pose);
-                obj.set_velocity([new_v 0 0], [new_a 0 0]);
-                
-                pause(sampling_time);
 
-                k = k+1;
+            while dist > goal_th &&  k < numel(path.States)
+                [new_v, new_a] = controller(current_pose);
+                next_pose = path.States(k, :);
+
+                p_dist = utility_functions.state_distance(current_pose, ...
+                                                          next_pose);
+
+                obj.set_velocity([new_v 0 0], [0 0 new_a]);
+                
+                % Stop execution for the time needed to reach the state
+                pause(p_dist/new_v);  % Is linear vel, should find other
+                
+                if path.States(k, :) ~= path.States(end, :)
+                    k = k+1;
+                end
                 current_pose = path.States(k, :);
                 dist = utility_functions.state_distance(current_pose, ...
                                                         goal_pose);
@@ -171,20 +196,16 @@ classdef agent
                 vel = [1 0 0];
             end
             if ~exist("correction_angle", "var")
-                correction_angle = 3.14;
+                correction_angle = 0;
             end
 
             obj.set_velocity(vel);
             k = 1;
-            while true && k < iterations
+            while k < iterations
                 obj = obj.compute_map(correction_angle);
                 [path, roadmap] = obj.compute_roadmap();
-                obj.execute_maneuvers(path, roadmap);
-                % if mod(k, 10)
-                %     obj.set_velocity(vel/10);
-                %     obj.compute_roadmap();
-                %     obj.set_velocity(vel);
-                % end
+                obj = obj.execute_maneuvers(path, roadmap);
+
                 k = k+1;
             end
             % [scan, poses] = scansAndPoses(obj.slam_builder);
