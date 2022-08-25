@@ -3,6 +3,7 @@
 	<model name="My_Agent">
 	<pose> 0 0 0.08 0 0 0</pose>
 	<link name="chassis">
+        
         <inertial>
             <mass> 20 </mass>
             <inertia>
@@ -13,7 +14,7 @@
                 <izz> 0.1068 </izz>
             </inertia>
         </inertial>
-
+        
         <collision name="chassis_collision">
 		<geometry>
 			<box>
@@ -200,18 +201,26 @@
 	<sensor name="Lidar" type="ray">
 		<pose>0 0 0 0 0 0</pose>
         <visualize> false </visualize>
-		<update_rate>30</update_rate>
+		<update_rate> 30 </update_rate>
 		<ray>
 		  <scan>
-			<horizontal>
+            <horizontal>
 			  <samples> 360 </samples>
 			  <resolution> 1 </resolution>
-			  <min_angle> -3.14 </min_angle>
-			  <max_angle> 3.14 </max_angle>
-			</horizontal>
+			  <min_angle> 0 </min_angle>
+			  <max_angle> 6.28 </max_angle>
+            </horizontal>
+            <!--
+            <vertical>
+			  <samples> 16 </samples>
+			  <resolution> 1 </resolution>
+			  <min_angle> -0.26 </min_angle>
+			  <max_angle> 0.26 </max_angle>
+            </vertical>
+            -->
 		  </scan>
 		  <range>
-			  <min> 0.021 </min>
+			  <min> 0.25 </min>
 			  <max> 5 </max>
 			  <resolution> 20 </resolution>
 	  	  </range>
@@ -237,21 +246,28 @@
 		<leftRearJoint> rear_left_wheel_hinge </leftRearJoint>
 		<rightRearJoint> rear_right_wheel_hinge </rightRearJoint>
         <commandTopic> /My_Agent/vel </commandTopic>
-        <wheelDiameter> 1.2 </wheelDiameter>
+        <wheelDiameter> 0.12 </wheelDiameter>
         <wheelSeparation> 0.24 </wheelSeparation>
         <robotBaseFrame> chassis </robotBaseFrame>
-            <!-- <wheelSpeed> 1 1 1 1 </wheelSpeed> -->
-    </plugin>
+            <!-- <odometryFrame> world </odometryFrame> -->
+        <broadcastTF> true </broadcastTF>
+        <odometryTopic> /My_Agent/odometry </odometryTopic>
+        </plugin>
+        
 
-    <!-- 
+    <!--
 	<plugin name="Control_Plugin" filename="libgazebo_ros_diff_drive.so">
-		<torque>2.0</torque>
-		<leftJoint> front_left_wheel_hinge </leftJoint>
-		<rightJoint> front_right_wheel_hinge </rightJoint>
+		<wheelTorque>2.0</wheelTorque>
+		<leftJoint> rear_left_wheel_hinge </leftJoint>
+		<rightJoint> rear_right_wheel_hinge </rightJoint>
 		<commandTopic> /My_Agent/vel </commandTopic>
+        <wheelDiameter> 0.12 </wheelDiameter>
+        <wheelAcceleration> 3 </wheelAcceleration>
+        <wheelSeparation> 0.24 </wheelSeparation>
         <robotBaseFrame> chassis </robotBaseFrame>
+        <odometryTopic> /My_Agent/odometry </odometryTopic>
 	</plugin>
-    -->
+    --> 
 
 	</model>
 </sdf>
