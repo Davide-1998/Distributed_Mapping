@@ -11,6 +11,7 @@ classdef agent
         max_lidar_map_range = 0;
         communication_range = 0;
         scanned_data_sub;
+        odometry_sub;
         vel_command;
         
         known_agents = [];
@@ -32,6 +33,25 @@ classdef agent
         function obj = set_overviewer(obj, ov)
             obj.overviewer = ov;
 
+        end
+        function [linear, angular] = get_current_vels(obj)
+            odomData = receive(obj.odometry_sub, 3);
+            linear = [odomData.Twist.Twist.Linear.X, ...
+                      odomData.Twist.Twist.Linear.Y, ...
+                      odomData.Twist.Twist.Linear.Z];
+            angular = [odomData.Twist.Twist.Angular.X, ...
+                       odomData.Twist.Twist.Angular.Y, ...
+                       odomData.Twist.Twist.Angular.Z];
+        end
+        function pose = get_current_pose(obj)
+            odomData = receive(obj.odometry_sub, 3);
+            position = odomData.Pose.Pose.Position;
+            pose = [position.X, position.Y, position.Z];
+        end
+        function orientation = get_current_orientation(obj)
+            odomData = receive(obj.odometry_sub, 3);
+            or_ = odomData.Pose.Pose.Orientation;
+            orientation = [or_.X, or_.Y, or_.Z, or_.W];
         end
         function obj = agent(id_, scan_range, current_pose, ...
                              absolute_p, current_vels, comm_range, ...
@@ -98,7 +118,7 @@ classdef agent
             msg.Angular.X = vel_angular(1);
             msg.Angular.Y = vel_angular(2);
             msg.Angular.Z = vel_angular(3);
-            
+
             obj.current_linear_vel = vel_linear(1);
             obj.current_angular_vel = vel_angular(3);
 
@@ -110,10 +130,15 @@ classdef agent
             end
             scan_topic = strcat('/', agent_id, '/ScanResults');
             scan_sub = utility_functions.subscriber_to_topic(scan_topic);
+            
+            od_topic = strcat('/', agent_id, '/odometry');
+            od_sub = utility_functions.subscriber_to_topic(od_topic);
+
             vel_topic = strcat('/', agent_id, '/vel');
             % LidarData = receive(scan_sub, 3);
 
             obj.scanned_data_sub = scan_sub;
+            obj.odometry_sub = od_sub;
             obj.vel_command = rospublisher(vel_topic);
             obj.ros_conn = true;
             obj.slam_builder = lidarSLAM(10, ...
@@ -124,9 +149,7 @@ classdef agent
         function obj = compute_map(obj, rotation_adjust)
             if obj.ros_conn == false
                 disp("Not connected to ROS");
-               
             else
-
                 LidarData = receive(obj.scanned_data_sub, 3);
                 array_of_collisions = LidarData.Ranges;
                 res_step = LidarData.AngleIncrement;
@@ -186,10 +209,11 @@ classdef agent
             % Build occupancy map
             occMap = buildMap(scans, poses, 10, obj.max_lidar_map_range);
             inflate(occMap, 0.1);
-            occMap.FreeThreshold = 0.49;
+            occMap.FreeThreshold = 0.51;
             
             % Generate search space and node validator
             now_pose = obj.current_relative_pose;
+            
             low_bound_x = now_pose(1) - obj.slam_builder.MaxLidarRange;
             high_bound_x = now_pose(1) + obj.slam_builder.MaxLidarRange;
             low_bound_y = now_pose(2) - obj.slam_builder.MaxLidarRange;
@@ -206,8 +230,8 @@ classdef agent
             % set up planner
             planner = plannerRRTStar(space, validator);
             planner.BallRadiusConstant = 0.4; % same?
-            planner.MaxNumTreeNodes = 100;  % Make it adaptive?
-            planner.MaxConnectionDistance = 0.4; % same?
+            planner.MaxNumTreeNodes = 30;  % Make it adaptive?
+            planner.MaxConnectionDistance = 1; % same?
             planner.ContinueAfterGoalReached = true;
 
             % Randomly sample next location to look up
@@ -225,55 +249,55 @@ classdef agent
             rng(100, 'twister')
             [pthObj, solnInfo] = plan(planner, start_state, next_state);
 
-            %{
+            
             figure;
             show(occMap);
             hold on;
             plot(solnInfo.TreeData(:,1),solnInfo.TreeData(:,2), '.-');
-            %}
+            hold on;
+            plot(pthObj.States(:, 1), pthObj.States(:, 2), '.-');
+            
         end
-        function obj = execute_maneuvers(obj, path, roadmap)
+        function obj = execute_maneuvers(obj, path)
             % A path input is made of X Y and Rotation
             if numel(path.States) == 0
                 return;
             end
             controller = controllerPurePursuit;
             controller.Waypoints = path.States(:, 1:2);
-            
-            controller.DesiredLinearVelocity = 3;
-            controller.MaxAngularVelocity = 1;
-            % controller.LookaheadDistance = 1.2;
 
-            
+            controller.DesiredLinearVelocity = 0.25;
+            controller.MaxAngularVelocity = 10;
+            controller.LookaheadDistance = 3;
+
             current_pose = path.States(1, :);
             goal_pose = path.States(end, :);
 
-            goal_th = 0.4;  % Same as maximum connection distance
-            
-            dist = utility_functions.euclidean_2D(current_pose, ...
-                                                  goal_pose);
-            
-            k = 1;
-            while dist > goal_th &&  k < numel(path.States)
+            goal_th = 0.5;
+
+            dist = utility_functions.euclidean_2D(current_pose, goal_pose);
+
+            initial_position = obj.get_current_pose();
+            sample_time = 0.1;
+            while dist > goal_th
                 [new_v, new_a] = controller(current_pose);
-                next_pose = path.States(k, :);
+                obj.set_velocity([new_v 0 0], [0, 0, new_a]);
+                % pause(sample_time);
 
-                p_dist = utility_functions.euclidean_2D(current_pose, ...
-                                                        next_pose);
+                new_position = obj.get_current_pose();
+                now_orientation = obj.get_current_orientation();
+                eul = quat2eul(now_orientation, 'ZYX');
 
-                obj.set_velocity([new_v 0 0], [0 0 new_a]);
-                
-                % Stop execution for the time needed to reach the state
-                pause(p_dist/new_v);  % Is linear vel, should find other
-                
-                if path.States(k, :) ~= path.States(end, :)
-                    k = k+1;
-                end
-                current_pose = path.States(k, :);
+                delta_position = new_position(1:2) - initial_position(1:2);
+
+                delta_pose = [delta_position(1), delta_position(2), 0];
+                current_pose = current_pose + delta_pose;
+                current_pose(3) = eul(3);
+
                 dist = utility_functions.euclidean_2D(current_pose, ...
                                                       goal_pose);
             end
-            obj.set_current_relative_pose(current_pose);
+            obj = obj.set_current_relative_pose(current_pose);
         end
         function [] = do_slam(obj, iterations, correction_angle)
             if ~exist("iterations", "var")
@@ -288,7 +312,7 @@ classdef agent
             while k < iterations
                 obj = obj.compute_map(correction_angle);
                 [path, roadmap] = obj.compute_roadmap();
-                obj = obj.execute_maneuvers(path, roadmap);
+                obj = obj.execute_maneuvers(path);
 
                 k = k+1;
             end
@@ -302,7 +326,12 @@ classdef agent
             figure;
             show(obj.slam_builder);
             title("slam for agent " + obj.id);
-            drawnow;
+            
+            figure;
+            title("Occupancy Map");
+            [scans, poses] = scansAndPoses(obj.slam_builder);
+            occMap = buildMap(scans, poses, 10, obj.max_lidar_map_range);
+            show(occMap);
         end
     end
 end

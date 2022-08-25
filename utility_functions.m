@@ -37,11 +37,13 @@ classdef utility_functions
 
             % update model and config
             model_lines(3) = sprintf('\t<model name=\"' + agent_id + '\">');
-            model_lines(220) = sprintf('\t\t<topicName> ' + agent_id + ...
+            model_lines(229) = sprintf('\t\t<topicName> ' + agent_id + ...
                                        '/ScanResults </topicName>');
-            model_lines(239) = sprintf('\t\t<commandTopic> /' + ...
+            model_lines(248) = sprintf('\t\t<commandTopic> /' + ...
                                        agent_id + '/vel </commandTopic>');
-
+            model_lines(254) = sprintf('\t\t<odometryTopic> /' + ...
+                                        agent_id + ...
+                                        '/odometry </odometryTopic>')
             config_lines(3) = sprintf('\t<name> ' + agent_id + ' </name>');
 
             % Creating dir for the model in the general dir
@@ -86,9 +88,13 @@ classdef utility_functions
         function [nearby_ranges, nearby_angles] = agent_data_to_local_system(ref_agent)
             nearby_ranges = [];
             nearby_angles = [];
+            nearby_agents = [];
+
             overviewer = ref_agent.overviewer;
-            nearby_agents = overviewer.any_nearby(ref_agent.id);
-            
+            if ~isempty(overviewer)
+                nearby_agents = overviewer.any_nearby(ref_agent.id);
+            end
+
             if numel(nearby_agents) ~= 0
                 keys = nearby_agents.keys;
 
