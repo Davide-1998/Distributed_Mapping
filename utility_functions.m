@@ -43,7 +43,7 @@ classdef utility_functions
                                        agent_id + '/vel </commandTopic>');
             model_lines(254) = sprintf('\t\t<odometryTopic> /' + ...
                                         agent_id + ...
-                                        '/odometry </odometryTopic>')
+                                        '/odometry </odometryTopic>');
             config_lines(3) = sprintf('\t<name> ' + agent_id + ' </name>');
 
             % Creating dir for the model in the general dir
@@ -83,6 +83,42 @@ classdef utility_functions
                  
             command = command + "generated_models/* " + gazebo_folder;
             system(command);
+        end
+
+        function xyz_cloud = pre_process_cloud3D(LidarData, lidar_range)
+            xyz_cloud = [];
+            cloud_c = 1;
+            for k=1:size(LidarData.Points, 1)
+                accepted_scan = true;
+
+                x_c = LidarData.Points(k).X;
+                y_c = LidarData.Points(k).Y;
+                z_c = LidarData.Points(k).Z;
+
+                % Check intersection with floor
+                rho = norm([x_c, y_c, z_c]);
+
+                if rho < 0.99*lidar_range % It is not the end of the sensor range
+                    theta = real(acos(z_c / rho));
+                    phi = atan2(y_c, x_c);
+
+                    if round(theta, 2) > pi/2 % Ray goes below the horizon line of lidar
+                        % Remove the floor reflection
+                        rho_xy = norm([x_c, y_c]);
+                        x_angle = x_c*cos(phi);
+                        y_angle = y_c*sin(phi);
+                        n_rho = norm([x_angle, y_angle]);
+                        if rho_xy ~= n_rho
+                            accepted_scan = false;
+                        end
+                    end
+
+                    if accepted_scan
+                        xyz_cloud(cloud_c, :) = [x_c, y_c, z_c];
+                        cloud_c = cloud_c + 1;
+                    end
+                end
+            end
         end
 
         function [nearby_ranges, nearby_angles] = agent_data_to_local_system(ref_agent)

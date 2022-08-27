@@ -13,7 +13,10 @@ classdef agent
         scanned_data_sub;
         odometry_sub;
         vel_command;
-        
+        map_cloud = []; % Cloud 3D representation of map
+        lidar_origin_height = 0;
+
+
         known_agents = [];
         overviewer;
 
@@ -24,6 +27,9 @@ classdef agent
     end
     
     methods
+        function obj = set_lidar_origin_height(obj, h)
+            obj.lidar_origin_height = h;
+        end
         function obj = set_max_lidar_map(obj, value)
             obj.max_lidar_map_range = value;
         end
@@ -55,7 +61,7 @@ classdef agent
         end
         function obj = agent(id_, scan_range, current_pose, ...
                              absolute_p, current_vels, comm_range, ...
-                             max_lidar_map_range_)
+                             max_lidar_map_range_, lidar_orig_h)
             if ~exist("id_", 'var')
                 id_ = "Default_id";
             end
@@ -73,6 +79,9 @@ classdef agent
             end
             if ~exist("current_vels", 'var')
                 current_vels = [0, 0];
+            if ~exist("lidar_orig_h", 'var')
+                lidar_orig_h = 0.105;
+            end
             elseif numel(current_vels) < 2
                 msg = "Expected 2 values for linear and angular\n" + ...
                       "Only the linear velocity will be set";
@@ -91,6 +100,7 @@ classdef agent
             obj.absolute_pose = absolute_p;
             obj.current_linear_vel = current_vels(1);
             obj.current_angular_vel = current_vels(2);
+            obj.lidar_origin_height = lidar_orig_h;
         end
 
         function obj = set_id(obj, new_id)
@@ -151,12 +161,35 @@ classdef agent
                 disp("Not connected to ROS");
             else
                 LidarData = receive(obj.scanned_data_sub, 3);
-                array_of_collisions = LidarData.Ranges;
-                res_step = LidarData.AngleIncrement;
+                % array_of_collisions = LidarData.Points;
+                local_cloud = utility_functions.pre_process_cloud3D(LidarData, ...
+                                                                    obj.lidar_range);
+                
+                local_cloud = local_cloud(:, :, :) + obj.current_relative_pose(1, 1:3);
+                obj.map_cloud = [obj.map_cloud; local_cloud];
+
+                occupied_2D = [];
+                ranges = [];
+                angles = [];
+                
+                for k=1:size(local_cloud, 1)
+                    if local_cloud(k, 3) < 1.1*obj.lidar_origin_height
+                        occupied_2D(k, :) = local_cloud(k, 1:2);
+                        x_local = local_cloud(k, 1);
+                        y_local = local_cloud(k, 2);
+                        theta = atan2(y_local, x_local);
+                        rho = norm([x_local, y_local]);
+                        ranges = [ranges, rho];
+                        angles = [angles, theta];
+                    end
+                end
+
+                % res_step = LidarData.AngleIncrement;
                 % max_range = LidarData.RangeMax;
                 
                 % Due to simulated sensor, data acquisition may vary
                 % Need a correction parameter
+                %{
                 if ~exist('rotation_adjust', 'var')
                     rotation_adjust = 0;
                 end
@@ -169,6 +202,7 @@ classdef agent
                         rho = array_of_collisions(k);
                         ranges(k, 1) = rho;
                 end
+                %}
 
                 % Check if any agent is nearby
                 [nearby_ranges, nearby_angles] = utility_functions.agent_data_to_local_system(obj);
@@ -184,15 +218,9 @@ classdef agent
                 if obj.no_scans == true
                     obj.no_scans = false;
                 end
-                addScan(obj.slam_builder, scan_in, obj.current_relative_pose);
-                % disp("Scan Pose");
-                % obj.current_relative_pose
+                addScan(obj.slam_builder, scan_in, obj.current_relative_pose(1:3));
+
                 [scans, poses] = scansAndPoses(obj.slam_builder);
-                
-                % Update agent relative position
-                % obj = obj.set_current_relative_pose(poses(end, :));
-                % disp("Pose after estimation")
-                % obj.current_relative_pose
             end
 
         end
@@ -200,11 +228,15 @@ classdef agent
             obj.prev_relative_pose = obj.current_relative_pose;
             obj.current_relative_pose = pose;
             obj.absolute_pose = obj.absolute_pose + pose;
-            obj.overviewer.registered_agents(obj.id) = obj;
+            if ~isempty(obj.overviewer)
+                obj.overviewer.registered_agents(obj.id) = obj;
+            end
         end
         function [pthObj, solnInfo] = compute_roadmap(obj)
             % Take the readings
             [scans, poses] = scansAndPoses(obj.slam_builder);
+            figure;
+            show(obj.slam_builder)
             
             % Build occupancy map
             occMap = buildMap(scans, poses, 10, obj.max_lidar_map_range);
@@ -214,9 +246,9 @@ classdef agent
             % Generate search space and node validator
             now_pose = obj.current_relative_pose;
             
-            low_bound_x = now_pose(1) - obj.slam_builder.MaxLidarRange;
+            low_bound_x = now_pose(1); % - obj.slam_builder.MaxLidarRange;
             high_bound_x = now_pose(1) + obj.slam_builder.MaxLidarRange;
-            low_bound_y = now_pose(2) - obj.slam_builder.MaxLidarRange;
+            low_bound_y = now_pose(2); % - obj.slam_builder.MaxLidarRange;
             high_bound_y = now_pose(2) + obj.slam_builder.MaxLidarRange;
             low_bound_rot = now_pose(3) - (pi/2);
             high_bound_rot = now_pose(3) + (pi/2);
@@ -230,8 +262,8 @@ classdef agent
             % set up planner
             planner = plannerRRTStar(space, validator);
             planner.BallRadiusConstant = 0.4; % same?
-            planner.MaxNumTreeNodes = 30;  % Make it adaptive?
-            planner.MaxConnectionDistance = 1; % same?
+            planner.MaxNumTreeNodes = 50;  % Make it adaptive?
+            planner.MaxConnectionDistance = 0.1; % same?
             planner.ContinueAfterGoalReached = true;
 
             % Randomly sample next location to look up
@@ -273,12 +305,12 @@ classdef agent
             current_pose = path.States(1, :);
             goal_pose = path.States(end, :);
 
-            goal_th = 0.5;
+            goal_th = 1;
 
             dist = utility_functions.euclidean_2D(current_pose, goal_pose);
 
             initial_position = obj.get_current_pose();
-            sample_time = 0.1;
+
             while dist > goal_th
                 [new_v, new_a] = controller(current_pose);
                 obj.set_velocity([new_v 0 0], [0, 0, new_a]);
