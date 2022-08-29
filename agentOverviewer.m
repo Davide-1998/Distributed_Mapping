@@ -67,7 +67,7 @@ classdef agentOverviewer
             end
         end
 
-        function [scans, poses] = get_data(obj, agent_id)
+        function [scans, poses, cmap] = get_data(obj, agent_id)
             if ~isKey(obj.registered_agents, agent_id)
                 disp(["Agent ", agent_id, " is not registered"]);
             end
@@ -75,7 +75,9 @@ classdef agentOverviewer
             selected_agent = obj.registered_agents(agent_id);
             if selected_agent.no_scans == false
                 [scans, poses] = scansAndPoses(selected_agent.slam_builder);
+                cmap = selected_agent.map_cloud;
             else
+                cmap = [];
                 scans = [];
                 poses = [];
             end

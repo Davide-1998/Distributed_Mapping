@@ -37,11 +37,11 @@ classdef utility_functions
 
             % update model and config
             model_lines(3) = sprintf('\t<model name=\"' + agent_id + '\">');
-            model_lines(229) = sprintf('\t\t<topicName> ' + agent_id + ...
+            model_lines(235) = sprintf('\t\t<topicName> ' + agent_id + ...
                                        '/ScanResults </topicName>');
-            model_lines(248) = sprintf('\t\t<commandTopic> /' + ...
+            model_lines(255) = sprintf('\t\t<commandTopic> /' + ...
                                        agent_id + '/vel </commandTopic>');
-            model_lines(254) = sprintf('\t\t<odometryTopic> /' + ...
+            model_lines(261) = sprintf('\t\t<odometryTopic> /' + ...
                                         agent_id + ...
                                         '/odometry </odometryTopic>');
             config_lines(3) = sprintf('\t<name> ' + agent_id + ' </name>');
@@ -108,9 +108,9 @@ classdef utility_functions
                         x_angle = x_c*cos(phi);
                         y_angle = y_c*sin(phi);
                         n_rho = norm([x_angle, y_angle]);
-                        if rho_xy ~= n_rho
+                        % if rho_xy ~= n_rho
                             accepted_scan = false;
-                        end
+                        % end
                     end
 
                     if accepted_scan
@@ -121,10 +121,38 @@ classdef utility_functions
             end
         end
 
+        function [ranges, angles] = cartesian_to_polar_2D(matrix)
+            ranges = zeros(size(matrix, 1), 1);
+            angles = zeros(size(matrix, 1), 1);
+            for k=1:size(matrix, 1)
+                ranges(k) = norm([matrix(k, 1), matrix(k, 2)]);
+                angles(k) = atan2(matrix(k, 2), matrix(k, 1));
+            end
+        end
+
+        function [ranges, angles] = map_3D_to_2D_polar(agent)
+            positions = nodes(agent.poses_graph);
+            ranges = [];
+            angles = [];
+
+            for k=1:numel(agent.map_cloud)
+                t_cloud = agent.map_cloud(k);
+                t_cloud = t_cloud.Location;
+                t_pose_angle = quat2eul(positions(k, 4:end));
+                t_pose = [positions(k, 1:2), t_pose_angle(3)];
+                t_cloud = t_cloud + t_pose;
+                
+                [new_r, new_a] = utility_functions.cartesian_to_polar_2D(t_cloud);
+                ranges = [ranges; new_r];
+                angles = [angles; new_a];
+            end
+        end
+
         function [nearby_ranges, nearby_angles] = agent_data_to_local_system(ref_agent)
             nearby_ranges = [];
             nearby_angles = [];
             nearby_agents = [];
+            cmap = [];
 
             overviewer = ref_agent.overviewer;
             if ~isempty(overviewer)
@@ -135,7 +163,7 @@ classdef utility_functions
                 keys = nearby_agents.keys;
 
                 for id_ag=1:numel(keys)
-                    [scan_data, scan_poses] = overviewer.get_data(keys{1, id_ag});
+                    [scan_data, scan_poses, cmap] = overviewer.get_data(keys{1, id_ag});
                     if isempty(scan_data) == true
                         return;
                     end
