@@ -69,10 +69,22 @@ classdef agent
                        odomData.Twist.Twist.Angular.Y, ...
                        odomData.Twist.Twist.Angular.Z];
         end
-        function pose = get_current_pose(obj)
+        function pose = get_current_pose(obj, vals)
+            if ~exist("vals", "var")
+                vals="full";
+            end
+            mustBeText(vals);
+
             odomData = receive(obj.odometry_sub, 3);
             position = odomData.Pose.Pose.Position;
-            pose = [position.X, position.Y, position.Z];
+            orientation = obj.get_current_orientation();
+            if vals == "XYR"
+                pose = [position.X, position.Y, orientation(3)];
+            elseif vals == "XYZR"
+                pose = [position.X, position.Y, position.Z, orientation(3)];
+            elseif vals == "full"
+                pose = [position.X, position.Y, position.Z, orientation];
+            end
         end
         function orientation = get_current_orientation(obj)
             odomData = receive(obj.odometry_sub, 3);
@@ -319,7 +331,7 @@ classdef agent
             
             % Build occupancy map
             occMap = buildMap(scans, poses, 10, obj.max_lidar_map_range);
-            inflate(occMap, 0.1);
+            inflate(occMap, 0.2);
             occMap.FreeThreshold = 0.50;
             
             % Generate search space and node validator
@@ -383,37 +395,36 @@ classdef agent
 
             current_pose = obj.current_relative_pose; % path.States(1, :);
             goal_pose = path.States(end, :);
+            disp(["State start: ", current_pose])
+            disp(["State end: ", goal_pose])
 
-            goal_th = 1;
+            goal_th = 0.5;
 
             dist = utility_functions.euclidean_2D(current_pose, goal_pose);
 
-            initial_position = obj.get_current_pose();
+            initial_pose = obj.get_current_pose("XYR");
 
-            [lin_v, ang_v] = obj.get_current_vels();
-            prev_l_v = lin_v;
-            prev_a_v = ang_v;
+%             [lin_v, ang_v] = obj.get_current_vels();
+%             prev_l_v = lin_v;
+%             prev_a_v = ang_v;
             while dist > goal_th
                 [new_v, new_a] = controller(current_pose);
                 obj = obj.set_velocity([new_v 0 0], [0, 0, new_a]);
-                % pause(sample_time);
 
-                new_position = obj.get_current_pose();
-                eul = obj.get_current_orientation();
+                new_pose = obj.get_current_pose("XYR");
+                
+                [new_x, new_y] = utility_functions.H_trans_2D(initial_pose(1:2), ...
+                                                              new_pose(1:2), ...
+                                                              obj.absolute_pose(3));
+                theta = new_pose(3) - initial_pose(3);
 
-                delta_position = new_position(1:2) - initial_position(1:2);
+                current_pose = [new_x, new_y, theta];
 
-                delta_pose = [delta_position(1), delta_position(2), 0];
-                current_pose = current_pose + delta_pose;
-                current_pose(3) = eul(3);
 
                 dist = utility_functions.euclidean_2D(current_pose, ...
                                                       goal_pose);
-                % Movement estimation
-                % elapsed_time = now - obj.last_set_vel_t;
-                % space_l = (pre_l_v(1) * elapsed_time) + ...
-                %           (obj.estimated_accelleration*(elasped_time)^2);
-                initial_position = new_position;
+
+                % initial_pose = new_pose;
                 disp([current_pose, "Dist: ", dist])
             end
             obj = obj.set_current_relative_pose(current_pose);

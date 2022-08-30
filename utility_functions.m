@@ -85,6 +85,22 @@ classdef utility_functions
             system(command);
         end
 
+        function [new_x, new_y] = H_trans_2D(d_oo, p_o, r_new)
+            % For doubts see the homogeneous transformation theory.
+            % d_oo: coordinates of new origin from reference one.
+            % p_o: point coordinates wrt the reference origin.
+            % r_new: rotation of the new origin wrt the reference one.
+            validateattributes(d_oo, {'numeric'}, {'size', [1, 2]});
+            validateattributes(p_o, {'numeric'}, {'size', [1, 2]});
+            
+            diff = p_o - d_oo;
+            rotation = [cos(r_new) -sin(r_new); sin(r_new) cos(r_new)];
+            
+            res = inv(rotation) * diff';
+            new_x = res(1);
+            new_y = res(2);
+        end
+
         function xyz_cloud = pre_process_cloud3D(LidarData, lidar_range)
             xyz_cloud = [];
             cloud_c = 1;
