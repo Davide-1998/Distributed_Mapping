@@ -85,6 +85,38 @@ classdef utility_functions
             system(command);
         end
 
+        function acc = estimate_accelleration(agent, its, desired_vel, vel_type)
+            agent = agent.ros_connect();
+            
+            time = zeros(its, 1);
+            for k=1:its
+                k
+                start_time = now;
+                if vel_type == "linear"
+                    [vel_l, vel_a] = agent.get_current_vels();
+                    agent = agent.set_velocity([desired_vel, 0, 0]);
+                    while round(vel_l(1), 2) < desired_vel
+                        [vel_l, vel_a] = agent.get_current_vels();
+                    end
+                elseif vel_type == "angular"
+                    [vel_l, vel_a] = agent.get_current_vels();
+                    agent = agent.set_velocity([0, 0, 0], [0, 0, desired_vel]);
+                    while round(vel_a(3), 2) < desired_vel
+                        [vel_l, vel_a] = agent.get_current_vels();
+                    end
+                end
+               time(k) = now-start_time
+               agent = agent.set_velocity();
+               while all(round(vel_l, 4) == 0) && all(round(vel_a, 4) == 0)
+                   [vel_l, vel_a] = agent.get_current_vels();
+               end
+            end
+            
+            acc = sum(time)/numel(time);
+
+            disp(["Estimated ", vel_type, " accelleration is ", acc]);
+        end
+
         function [new_x, new_y] = H_trans_2D(d_oo, p_o, r_new)
             % For doubts see the homogeneous transformation theory.
             % d_oo: coordinates of new origin from reference one.
@@ -101,7 +133,8 @@ classdef utility_functions
             new_y = res(2);
         end
 
-        function xyz_cloud = pre_process_cloud3D(LidarData, lidar_range)
+        function xyz_cloud = pre_process_cloud3D(LidarData, lidar_range, ...
+                                                 lidar_origin_height)
             xyz_cloud = [];
             cloud_c = 1;
             for k=1:size(LidarData.Points, 1)
@@ -124,9 +157,12 @@ classdef utility_functions
                         x_angle = x_c*cos(phi);
                         y_angle = y_c*sin(phi);
                         n_rho = norm([x_angle, y_angle]);
-                        % if rho_xy ~= n_rho
+                        
+                        if z_c < -1.5*lidar_origin_height
+                            accepted_scan = true;
+                        else
                             accepted_scan = false;
-                        % end
+                        end
                     end
 
                     if accepted_scan
@@ -135,6 +171,12 @@ classdef utility_functions
                     end
                 end
             end
+            
+            
+            % player = pcplayer([-20, 20], [-20, 20], [-20, 20]);
+            % while isOpen(player)
+            %     view(player, cloud);
+            % end
         end
 
         function [ranges, angles] = cartesian_to_polar_2D(matrix)

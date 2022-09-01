@@ -13,6 +13,10 @@
 classdef agent
     properties
         id = "Agent_default";
+        % factory details
+        wheel_radius = 0.06;
+        wheel_separation = 0.24;
+
         current_relative_pose = [0; 0; 0];  % x y rotation
         prev_relative_pose = [0; 0; 0];
         current_linear_vel = 0;
@@ -60,6 +64,16 @@ classdef agent
             obj.overviewer = ov;
 
         end
+
+        function obj = set_factory_setup(obj, wr, ws)
+            obj.wheel_radius = wr;
+            obj.wheel_separation = ws;
+        end
+        function [wr, ws] = get_factory_setup(obj)
+            wr = obj.wheel_radius;
+            ws = obj.wheel_separation;
+        end
+
         function [linear, angular] = get_current_vels(obj)
             odomData = receive(obj.odometry_sub, 3);
             linear = [odomData.Twist.Twist.Linear.X, ...
@@ -247,10 +261,11 @@ classdef agent
                 disp("Not connected to ROS");
                 return;
             else
-                LidarData = receive(obj.scanned_data_sub, 3);
+                obj.LidarData = receive(obj.scanned_data_sub, 3);
                 % array_of_collisions = LidarData.Points;
-                local_cloud = utility_functions.pre_process_cloud3D(LidarData, ...
-                                                                    obj.lidar_range);
+                local_cloud = utility_functions.pre_process_cloud3D(obj.LidarData, ...
+                                                                    obj.lidar_range, ...
+                                                                    obj.lidar_origin_height);
                 obj.map_cloud = [obj.map_cloud; pointCloud(local_cloud)];
                 
                 [ranges, angles] = utility_functions.cartesian_to_polar_2D(local_cloud);
@@ -404,9 +419,6 @@ classdef agent
 
             initial_pose = obj.get_current_pose("XYR");
 
-%             [lin_v, ang_v] = obj.get_current_vels();
-%             prev_l_v = lin_v;
-%             prev_a_v = ang_v;
             while dist > goal_th
                 [new_v, new_a] = controller(current_pose);
                 obj = obj.set_velocity([new_v 0 0], [0, 0, new_a]);
@@ -444,12 +456,8 @@ classdef agent
                 obj = obj.compute_map(correction_angle);
                 [path, roadmap] = obj.compute_roadmap();
                 obj = obj.execute_maneuvers(path);
-
                 k = k+1;
             end
-            % [scans, poses] = scansAndPoses(obj.slam_builder);
-            % save("slam_scans_" + obj.id + ".mat", 'scans');
-            % save("slam_poses_" + obj.id + ".mat", 'poses');
             obj = obj.set_velocity([0 0 0]);  % Stop agent after slamming
             obj.show_map();
         end

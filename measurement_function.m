@@ -1,9 +1,9 @@
 % Measurement function
-% Input state has [now_pos_x, now_vel_x, new_vel_x, now_pos_y, ...
-%                  now_vel_y, new_vel_y, theta, old_angular_vel, new_angular_vel, 
-%                  elapsed_time]
-% Input state size is [10, 1]
+% Input state has [current_pose, controller_outputs, ...
+%                  [wheel_radius, wheel_separation], ...
+%                  start_time, end_time]
+% Input state size is [1, 5]
 
-function meas = measurement_function(state)
+function meas = measurement_function(state, controller_out, robot_params, time)
     meas = state;
 end
