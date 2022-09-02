@@ -203,27 +203,30 @@
         <visualize> false </visualize>
 		<update_rate> 20 </update_rate>
 		<ray>
-		  <scan>
+          <scan>
             <horizontal>
-			  <samples> 360 </samples>
-			  <resolution> 1 </resolution>
-			  <min_angle> 0 </min_angle>
-			  <max_angle> 6.28 </max_angle>
+              <samples>1800</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.141592</min_angle>
+              <max_angle>3.141592</max_angle>
             </horizontal>
-            
             <vertical>
-			  <samples> 16 </samples>
-			  <resolution> 1 </resolution>
-			  <min_angle> -0.26 </min_angle>
-			  <max_angle> 0.26 </max_angle>
+              <samples>16</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.26</min_angle>
+              <max_angle>0.26</max_angle>
             </vertical>
-            
-		  </scan>
-		  <range>
-			  <min> 0.25 </min>
-			  <max> 5 </max>
-			  <resolution> 20 </resolution>
-	  	  </range>
+          </scan>
+          <range>
+            <min>0.25</min>
+            <max>15</max> <!-- Was 150 before</end>
+            <resolution>0.01</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0</mean>
+            <stddev>0.01</stddev>
+          </noise>
         </ray>
         <!-- Plugin controlling laser data stream
 		<plugin name="Imported_plugin" filename="libgazebo_ros_laser.so">
