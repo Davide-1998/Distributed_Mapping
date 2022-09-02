@@ -1,7 +1,22 @@
-%Agent Script
+% Agent Script
+% The agent acceleration parameter has been estimated empirically counting
+% the time necessay to reach the desired velocity starting from a still
+% position.
+% The test have been performed in the world of tree_corridor_2_agents.
+% and 7 acquisition were made. All data were round to 3 significant digits.
+% Best time: 5.505
+% Worst time: 6.108
+% Mean value over 7 acquisitions: 5.7431
+% Acceleration estimated using the equation V = V0 + a*t st. V0 = 0 & V = 1
+% Acceleration found: a = 1/5.7431 = 0.1741 = 0.174
+
 classdef agent
     properties
         id = "Agent_default";
+        % factory details
+        wheel_radius = 0.06;
+        wheel_separation = 0.24;
+
         current_relative_pose = [0; 0; 0];  % x y rotation
         prev_relative_pose = [0; 0; 0];
         current_linear_vel = 0;
@@ -13,9 +28,18 @@ classdef agent
         scanned_data_sub;
         odometry_sub;
         vel_command;
-        map_cloud = []; % Cloud 3D representation of map
+        
         lidar_origin_height = 0;
 
+        % SLAM Attributes
+        map_cloud = []; % Cloud 3D representation of map
+        poses_graph = poseGraph3D;
+        prev_tf;
+        
+        % Motion model Parameters
+        estimated_acceleration = 0.1741;
+        last_set_vel_t = 0;
+        vel_desired = 0
 
         known_agents = [];
         overviewer;
@@ -40,6 +64,16 @@ classdef agent
             obj.overviewer = ov;
 
         end
+
+        function obj = set_factory_setup(obj, wr, ws)
+            obj.wheel_radius = wr;
+            obj.wheel_separation = ws;
+        end
+        function [wr, ws] = get_factory_setup(obj)
+            wr = obj.wheel_radius;
+            ws = obj.wheel_separation;
+        end
+
         function [linear, angular] = get_current_vels(obj)
             odomData = receive(obj.odometry_sub, 3);
             linear = [odomData.Twist.Twist.Linear.X, ...
@@ -49,21 +83,37 @@ classdef agent
                        odomData.Twist.Twist.Angular.Y, ...
                        odomData.Twist.Twist.Angular.Z];
         end
-        function pose = get_current_pose(obj)
+        function pose = get_current_pose(obj, vals)
+            if ~exist("vals", "var")
+                vals="full";
+            end
+            mustBeText(vals);
+
             odomData = receive(obj.odometry_sub, 3);
             position = odomData.Pose.Pose.Position;
-            pose = [position.X, position.Y, position.Z];
+            orientation = obj.get_current_orientation();
+            if vals == "XYR"
+                pose = [position.X, position.Y, orientation(3)];
+            elseif vals == "XYZR"
+                pose = [position.X, position.Y, position.Z, orientation(3)];
+            elseif vals == "full"
+                pose = [position.X, position.Y, position.Z, orientation];
+            end
         end
         function orientation = get_current_orientation(obj)
             odomData = receive(obj.odometry_sub, 3);
             or_ = odomData.Pose.Pose.Orientation;
-            orientation = [or_.X, or_.Y, or_.Z, or_.W];
+            quat_orientation = [or_.X, or_.Y, or_.Z, or_.W];
+            orientation = quat2eul(quat_orientation, 'ZYX');
         end
         function obj = agent(id_, scan_range, current_pose, ...
                              absolute_p, current_vels, comm_range, ...
-                             max_lidar_map_range_, lidar_orig_h)
+                             max_lidar_map_range_, lidar_orig_h, est_acc)
             if ~exist("id_", 'var')
                 id_ = "Default_id";
+            end
+            if ~exist("est_acc", 'var')
+                est_acc = 0.1741;
             end
             if ~exist("scan_range", 'var')
                 scan_range = 1;  % meters
@@ -101,13 +151,14 @@ classdef agent
             obj.current_linear_vel = current_vels(1);
             obj.current_angular_vel = current_vels(2);
             obj.lidar_origin_height = lidar_orig_h;
+            obj.estimated_acceleration = est_acc;
         end
 
         function obj = set_id(obj, new_id)
             obj.id = new_id;
         end
 
-        function set_velocity(obj, vel_linear, vel_angular)
+        function obj = set_velocity(obj, vel_linear, vel_angular)
             if ~obj.ros_conn
                 disp("Connect to ROS before sending messages")
                 return
@@ -133,6 +184,7 @@ classdef agent
             obj.current_angular_vel = vel_angular(3);
 
             send(obj.vel_command, msg);
+            obj.last_set_vel_t = now;
         end
         function obj = ros_connect(obj, agent_id)
             if ~exist('agent_id', 'var')
@@ -156,16 +208,71 @@ classdef agent
             obj.slam_builder.LoopClosureThreshold = 210;  
             obj.slam_builder.LoopClosureSearchRadius = 5;
         end
+        function obj = refine_3D_map(obj)
+            prevTF = [];
+            for k=1:size(obj.map_cloud, 1)
+                pcl_wogrd = obj.map_cloud(k);
+                % pcl_wogrd = pointCloud(local_cloud);
+                % Data downsampling for speed
+                pcl_wogrd_sampled = pcdownsample(pcl_wogrd, 'random', 0.25);
+
+                % Registering point cloud
+                scanAccepted = 1;
+                count = size(obj.map_cloud, 1);
+                if count == 0
+                    tform = [];
+                else
+                    if count == 1
+                        moving = obj.map_cloud(count);
+                        tform = pcregisterndt(pcl_wogrd_sampled, moving, 2.5);
+                    else
+                        tform = pcregisterndt(pcl_wogrd_sampled, obj.map_cloud(count), 2.5, ...
+                            'InitialTransform', prevTF);
+                    end
+
+                    relPose = [tform2trvec(tform.T') tform2quat(tform.T')];
+                    addRelativePose(obj.poses_graph,relPose);
+                    %{
+                    if sqrt(norm(relPose(1:3))) > distanceMovedThreshold
+                        addRelativePose(pGraph,relPose);
+
+                    else
+                        scanAccepted = 0;
+                    end
+                    %}
+                end
+
+                if scanAccepted == 1
+                    count = count + 1;
+
+                    % obj.map_cloud = [obj.map_cloud; pcl_wogrd_sampled];
+
+                    % pose graph optimization
+                    % if mod(count, 5) == 0 %size(obj.map_cloud, 1) >= 2
+                    obj.poses_graph = optimizePoseGraph(obj.poses_graph);
+                    % nd
+                    prevTF = tform;
+                end
+            end
+        end
+
         function obj = compute_map(obj, rotation_adjust)
             if obj.ros_conn == false
                 disp("Not connected to ROS");
+                return;
             else
-                LidarData = receive(obj.scanned_data_sub, 3);
+                obj.LidarData = receive(obj.scanned_data_sub, 3);
                 % array_of_collisions = LidarData.Points;
-                local_cloud = utility_functions.pre_process_cloud3D(LidarData, ...
-                                                                    obj.lidar_range);
+                local_cloud = utility_functions.pre_process_cloud3D(obj.LidarData, ...
+                                                                    obj.lidar_range, ...
+                                                                    obj.lidar_origin_height);
+                obj.map_cloud = [obj.map_cloud; pointCloud(local_cloud)];
                 
-                local_cloud = local_cloud(:, :, :) + obj.current_relative_pose(1, 1:3);
+                [ranges, angles] = utility_functions.cartesian_to_polar_2D(local_cloud);
+
+                %{
+                local_cloud = local_cloud + obj.current_relative_pose(1:3);
+                disp(obj.current_relative_pose)
                 obj.map_cloud = [obj.map_cloud; local_cloud];
 
                 occupied_2D = [];
@@ -183,6 +290,7 @@ classdef agent
                         angles = [angles, theta];
                     end
                 end
+                %}
 
                 % res_step = LidarData.AngleIncrement;
                 % max_range = LidarData.RangeMax;
@@ -235,13 +343,11 @@ classdef agent
         function [pthObj, solnInfo] = compute_roadmap(obj)
             % Take the readings
             [scans, poses] = scansAndPoses(obj.slam_builder);
-            figure;
-            show(obj.slam_builder)
             
             % Build occupancy map
             occMap = buildMap(scans, poses, 10, obj.max_lidar_map_range);
-            inflate(occMap, 0.1);
-            occMap.FreeThreshold = 0.51;
+            inflate(occMap, 0.2);
+            occMap.FreeThreshold = 0.50;
             
             % Generate search space and node validator
             now_pose = obj.current_relative_pose;
@@ -261,9 +367,9 @@ classdef agent
 
             % set up planner
             planner = plannerRRTStar(space, validator);
-            planner.BallRadiusConstant = 0.4; % same?
+            planner.BallRadiusConstant = 0.5; % same?
             planner.MaxNumTreeNodes = 50;  % Make it adaptive?
-            planner.MaxConnectionDistance = 0.1; % same?
+            planner.MaxConnectionDistance = 1; % same?
             planner.ContinueAfterGoalReached = true;
 
             % Randomly sample next location to look up
@@ -298,39 +404,44 @@ classdef agent
             controller = controllerPurePursuit;
             controller.Waypoints = path.States(:, 1:2);
 
-            controller.DesiredLinearVelocity = 0.25;
+            controller.DesiredLinearVelocity = 0.5;
             controller.MaxAngularVelocity = 10;
-            controller.LookaheadDistance = 3;
+            % controller.LookaheadDistance = 0.3;
 
-            current_pose = path.States(1, :);
+            current_pose = obj.current_relative_pose; % path.States(1, :);
             goal_pose = path.States(end, :);
+            disp(["State start: ", current_pose])
+            disp(["State end: ", goal_pose])
 
-            goal_th = 1;
+            goal_th = 0.5;
 
             dist = utility_functions.euclidean_2D(current_pose, goal_pose);
 
-            initial_position = obj.get_current_pose();
+            initial_pose = obj.get_current_pose("XYR");
 
             while dist > goal_th
                 [new_v, new_a] = controller(current_pose);
-                obj.set_velocity([new_v 0 0], [0, 0, new_a]);
-                % pause(sample_time);
+                obj = obj.set_velocity([new_v 0 0], [0, 0, new_a]);
 
-                new_position = obj.get_current_pose();
-                now_orientation = obj.get_current_orientation();
-                eul = quat2eul(now_orientation, 'ZYX');
+                new_pose = obj.get_current_pose("XYR");
+                
+                [new_x, new_y] = utility_functions.H_trans_2D(initial_pose(1:2), ...
+                                                              new_pose(1:2), ...
+                                                              obj.absolute_pose(3));
+                theta = new_pose(3) - initial_pose(3);
 
-                delta_position = new_position(1:2) - initial_position(1:2);
+                current_pose = [new_x, new_y, theta];
 
-                delta_pose = [delta_position(1), delta_position(2), 0];
-                current_pose = current_pose + delta_pose;
-                current_pose(3) = eul(3);
 
                 dist = utility_functions.euclidean_2D(current_pose, ...
                                                       goal_pose);
+
+                % initial_pose = new_pose;
+                disp([current_pose, "Dist: ", dist])
             end
             obj = obj.set_current_relative_pose(current_pose);
         end
+
         function [] = do_slam(obj, iterations, correction_angle)
             if ~exist("iterations", "var")
                 iterations = 100;
@@ -345,25 +456,33 @@ classdef agent
                 obj = obj.compute_map(correction_angle);
                 [path, roadmap] = obj.compute_roadmap();
                 obj = obj.execute_maneuvers(path);
-
                 k = k+1;
             end
-            % [scans, poses] = scansAndPoses(obj.slam_builder);
-            % save("slam_scans_" + obj.id + ".mat", 'scans');
-            % save("slam_poses_" + obj.id + ".mat", 'poses');
-            obj.set_velocity([0 0 0]);  % Stop agent after slamming
+            obj = obj.set_velocity([0 0 0]);  % Stop agent after slamming
             obj.show_map();
         end
         function [] = show_map(obj)
-            figure;
-            show(obj.slam_builder);
-            title("slam for agent " + obj.id);
-            
             figure;
             title("Occupancy Map");
             [scans, poses] = scansAndPoses(obj.slam_builder);
             occMap = buildMap(scans, poses, 10, obj.max_lidar_map_range);
             show(occMap);
+
+            obj = obj.refine_3D_map();
+            
+            player = pcplayer([-20, +20], [-20, +20], [-10, 10]);
+            my_cloud_ag = [];
+            nodesPositions = nodes(obj.poses_graph);
+            for k=1:numel(obj.map_cloud)
+                t_cloud = obj.map_cloud(k).Location;
+                t_pose_angle = quat2eul(nodesPositions(k, 4:end));
+                t_pose = [nodesPositions(k, 1:2), t_pose_angle(3)];
+                t_cloud = t_cloud + t_pose;
+                my_cloud_ag = [my_cloud_ag; t_cloud];
+            end
+            while isOpen(player) 
+                view(player, my_cloud_ag);           
+             end 
         end
     end
 end

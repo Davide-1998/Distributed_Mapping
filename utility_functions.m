@@ -37,11 +37,11 @@ classdef utility_functions
 
             % update model and config
             model_lines(3) = sprintf('\t<model name=\"' + agent_id + '\">');
-            model_lines(229) = sprintf('\t\t<topicName> ' + agent_id + ...
+            model_lines(235) = sprintf('\t\t<topicName> ' + agent_id + ...
                                        '/ScanResults </topicName>');
-            model_lines(248) = sprintf('\t\t<commandTopic> /' + ...
+            model_lines(255) = sprintf('\t\t<commandTopic> /' + ...
                                        agent_id + '/vel </commandTopic>');
-            model_lines(254) = sprintf('\t\t<odometryTopic> /' + ...
+            model_lines(261) = sprintf('\t\t<odometryTopic> /' + ...
                                         agent_id + ...
                                         '/odometry </odometryTopic>');
             config_lines(3) = sprintf('\t<name> ' + agent_id + ' </name>');
@@ -85,7 +85,56 @@ classdef utility_functions
             system(command);
         end
 
-        function xyz_cloud = pre_process_cloud3D(LidarData, lidar_range)
+        function acc = estimate_accelleration(agent, its, desired_vel, vel_type)
+            agent = agent.ros_connect();
+            
+            time = zeros(its, 1);
+            for k=1:its
+                k
+                start_time = now;
+                if vel_type == "linear"
+                    [vel_l, vel_a] = agent.get_current_vels();
+                    agent = agent.set_velocity([desired_vel, 0, 0]);
+                    while round(vel_l(1), 2) < desired_vel
+                        [vel_l, vel_a] = agent.get_current_vels();
+                    end
+                elseif vel_type == "angular"
+                    [vel_l, vel_a] = agent.get_current_vels();
+                    agent = agent.set_velocity([0, 0, 0], [0, 0, desired_vel]);
+                    while round(vel_a(3), 2) < desired_vel
+                        [vel_l, vel_a] = agent.get_current_vels();
+                    end
+                end
+               time(k) = now-start_time
+               agent = agent.set_velocity();
+               while all(round(vel_l, 4) == 0) && all(round(vel_a, 4) == 0)
+                   [vel_l, vel_a] = agent.get_current_vels();
+               end
+            end
+            
+            acc = sum(time)/numel(time);
+
+            disp(["Estimated ", vel_type, " accelleration is ", acc]);
+        end
+
+        function [new_x, new_y] = H_trans_2D(d_oo, p_o, r_new)
+            % For doubts see the homogeneous transformation theory.
+            % d_oo: coordinates of new origin from reference one.
+            % p_o: point coordinates wrt the reference origin.
+            % r_new: rotation of the new origin wrt the reference one.
+            validateattributes(d_oo, {'numeric'}, {'size', [1, 2]});
+            validateattributes(p_o, {'numeric'}, {'size', [1, 2]});
+            
+            diff = p_o - d_oo;
+            rotation = [cos(r_new) -sin(r_new); sin(r_new) cos(r_new)];
+            
+            res = inv(rotation) * diff';
+            new_x = res(1);
+            new_y = res(2);
+        end
+
+        function xyz_cloud = pre_process_cloud3D(LidarData, lidar_range, ...
+                                                 lidar_origin_height)
             xyz_cloud = [];
             cloud_c = 1;
             for k=1:size(LidarData.Points, 1)
@@ -108,7 +157,10 @@ classdef utility_functions
                         x_angle = x_c*cos(phi);
                         y_angle = y_c*sin(phi);
                         n_rho = norm([x_angle, y_angle]);
-                        if rho_xy ~= n_rho
+                        
+                        if z_c < -1.5*lidar_origin_height
+                            accepted_scan = true;
+                        else
                             accepted_scan = false;
                         end
                     end
@@ -119,12 +171,46 @@ classdef utility_functions
                     end
                 end
             end
+            
+            
+            % player = pcplayer([-20, 20], [-20, 20], [-20, 20]);
+            % while isOpen(player)
+            %     view(player, cloud);
+            % end
+        end
+
+        function [ranges, angles] = cartesian_to_polar_2D(matrix)
+            ranges = zeros(size(matrix, 1), 1);
+            angles = zeros(size(matrix, 1), 1);
+            for k=1:size(matrix, 1)
+                ranges(k) = norm([matrix(k, 1), matrix(k, 2)]);
+                angles(k) = atan2(matrix(k, 2), matrix(k, 1));
+            end
+        end
+
+        function [ranges, angles] = map_3D_to_2D_polar(agent)
+            positions = nodes(agent.poses_graph);
+            ranges = [];
+            angles = [];
+
+            for k=1:numel(agent.map_cloud)
+                t_cloud = agent.map_cloud(k);
+                t_cloud = t_cloud.Location;
+                t_pose_angle = quat2eul(positions(k, 4:end));
+                t_pose = [positions(k, 1:2), t_pose_angle(3)];
+                t_cloud = t_cloud + t_pose;
+                
+                [new_r, new_a] = utility_functions.cartesian_to_polar_2D(t_cloud);
+                ranges = [ranges; new_r];
+                angles = [angles; new_a];
+            end
         end
 
         function [nearby_ranges, nearby_angles] = agent_data_to_local_system(ref_agent)
             nearby_ranges = [];
             nearby_angles = [];
             nearby_agents = [];
+            cmap = [];
 
             overviewer = ref_agent.overviewer;
             if ~isempty(overviewer)
@@ -135,7 +221,7 @@ classdef utility_functions
                 keys = nearby_agents.keys;
 
                 for id_ag=1:numel(keys)
-                    [scan_data, scan_poses] = overviewer.get_data(keys{1, id_ag});
+                    [scan_data, scan_poses, cmap] = overviewer.get_data(keys{1, id_ag});
                     if isempty(scan_data) == true
                         return;
                     end

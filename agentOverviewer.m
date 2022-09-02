@@ -1,11 +1,40 @@
 classdef agentOverviewer
     properties
         registered_agents;
+        map_properties;
     end
 
     methods
         function obj = agentOverviewer()
             obj.registered_agents = containers.Map;
+            obj.map_properties = struct(['no_gps_limits'], [[]]);
+        end
+        
+        function obj = set_no_gps_areas(obj, x_limits, y_limits)
+            validateattributes(x_limits, {'numeric'}, {'size', [1, 2]});
+            validateattributes(y_limits, {'numeric'}, {'size', [1, 2]});
+            limits = [[min(x_limits); max(x_limits)], ...
+                      [min(y_limits); max(y_limits)]];
+            obj.map_properties.no_gps_limits = limits;
+            obj.map_properties.no_gps_limits
+        end
+
+        function res = is_gps_available(obj, pos)
+            validateattributes(pos, {'numeric'}, {'size', [1, 2]});
+            if isempty(obj.map_properties.no_gps_limits)
+                disp("No GPS limits setted, returning true");
+                res = true;
+                return;
+            end
+            
+            if pos(1) < obj.map_properties.no_gps_limits(1, 2) && ...
+               pos(1) > obj.map_properties.no_gps_limits(1, 1) && ...
+               pos(2) < obj.map_properties.no_gps_limits(2, 2) && ...
+               pos(2) > obj.map_properties.no_gps_limits(2, 1)
+                res = false;
+            else
+                res = true;
+            end
         end
 
         function obj = register_agent(obj, agent)
@@ -67,7 +96,7 @@ classdef agentOverviewer
             end
         end
 
-        function [scans, poses] = get_data(obj, agent_id)
+        function [scans, poses, cmap] = get_data(obj, agent_id)
             if ~isKey(obj.registered_agents, agent_id)
                 disp(["Agent ", agent_id, " is not registered"]);
             end
@@ -75,7 +104,9 @@ classdef agentOverviewer
             selected_agent = obj.registered_agents(agent_id);
             if selected_agent.no_scans == false
                 [scans, poses] = scansAndPoses(selected_agent.slam_builder);
+                cmap = selected_agent.map_cloud;
             else
+                cmap = [];
                 scans = [];
                 poses = [];
             end
