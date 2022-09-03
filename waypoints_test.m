@@ -1,6 +1,8 @@
 %% Waypoints maneuvers test
+% Use this code to test the efficiency of the EKF filter in the agent
+
 utility_functions.setup_environment("192.168.1.97", "192.168.1.126");
-obj = agent("My_Agent", 5, [0, 0, 0], [-1, 1, -pi/4], [0 0], 10, 20, 0.105);
+obj = agent("My_Agent", 5, [0, 0, 0], [-1, 1, -pi/4], 10, 20, 0.105);
 obj = obj.set_factory_setup(0.06, 0.24);
 
 x_lims = [-2, 2];
@@ -52,34 +54,33 @@ dist = utility_functions.euclidean_2D(current_pose, goal_pose);
 
 initial_pose = obj.get_current_pose("XYR"); % Absolute pose
 
-% kinematicModel = differentialDriveKinematics("WheelRadius", 0.06, ...
-%                                              "TrackWidth", 0.24, ...
-%                                              "VehicleInputs", "VehicleSpeedHeadingRate");
-
 kf = trackingEKF(@tran_function, @measurement_function, current_pose, ...
-                 "MeasurementNoise", 0.2, ...
-                 'ProcessNoise', diag([50,50,1]));
+                 "MeasurementNoise", 0.1, ...
+                 'ProcessNoise', diag([1,1,1]));
 
 true_poses = [current_pose(1:2)];
-diff_drive = [];
-predicted_poses = [];
-track_err = [];
-traj = [];
+kf_no_gps = [];
+corr_kf = [];
+est_kf = [];
 
 while dist > goal_th
     [v_l, v_a] = obj.get_current_vels();
     [new_v, new_a] = controller(current_pose);
     obj = obj.set_velocity([new_v 0 0], [0, 0, new_a]);   
     start_time = datetime('now');
+    pause(0.1);
    
     new_pose = obj.get_current_pose("XYR"); % Absolute pose
-    
+    [new_x, new_y] = utility_functions.H_trans_2D(initial_pose(1:2), ...
+                                                      new_pose(1:2), ...
+                                                      obj.absolute_pose(3));
+
     if obj.overviewer.is_gps_available(new_pose(1:2))
         disp("GPS ON")
 
-        [new_x, new_y] = utility_functions.H_trans_2D(initial_pose(1:2), ...
-                                                      new_pose(1:2), ...
-                                                      obj.absolute_pose(3));
+%         [new_x, new_y] = utility_functions.H_trans_2D(initial_pose(1:2), ...
+%                                                       new_pose(1:2), ...
+%                                                       obj.absolute_pose(3));
         
         [wr, ws] = obj.get_factory_setup();
         
@@ -89,20 +90,24 @@ while dist > goal_th
 
 
         now_time = datetime('now');
-        est_pose = kf.predict([new_v, new_a], [wr, ws], [start_time, now_time]);
-        
-        x_corr = kf.correct(current_pose, [new_v, new_a], [wr, ws], [start_time, now_time]);
+        elapsed_time = seconds(now_time - start_time);
+        est_pose = kf.predict([new_v, new_a], [wr, ws], [0, elapsed_time]);
+        est_kf = [est_kf; est_pose(1:2)];
+
+        x_corr = kf.correct(current_pose, [new_v, new_a], [wr, ws], [0, elapsed_time]);
+        corr_kf = [corr_kf; x_corr(1:2)];
         
     else
         disp("GPS OFF - KF in use");
         now_time = datetime('now');
-        est_pose = kf.predict([new_v, new_a], [wr, ws], [start_time, now_time]);
+        elpsed_time = seconds(now_time - start_time);
+        est_pose = kf.predict([new_v, new_a], [wr, ws], [0, elapsed_time]);
         % disp(["Estimate pose", est_pose])
-
+        kf_no_gps = [kf_no_gps; est_pose(1:2)];
         current_pose = est_pose;
     end
 
-    traj = [traj; current_pose(1:2)];
+    true_poses = [true_poses; [new_x, new_y]];
     dist = utility_functions.euclidean_2D(current_pose, ...
                                           goal_pose);
     % disp(["Current_pose", current_pose])
@@ -124,19 +129,22 @@ obj.set_velocity();
 
 f_1 = figure;
 f_1.Position = [0 0 1000 1000];
-plot(traj(:, 1), traj(:, 2), 'LineWidth', 2);
-% plot(true_poses(:, 1), true_poses(:, 2), 'LineWidth', 2);
-% hold on
-% plot(predicted_poses(:, 1), predicted_poses(:, 2), 'LineWidth', 1.1);
+plot(true_poses(:, 1), true_poses(:, 2), 'LineWidth', 2, "Color", 'g');
+hold on
+plot(est_kf(:, 1), est_kf(:, 2), "x", "Color", 'b', "LineWidth", 2);
+hold on
+plot(corr_kf(:, 1), corr_kf(:, 2), "o", "Color", 'b', "LineWidth", 2);
 hold on
 plot(waypoints(:, 1), waypoints(:, 2), '^-', 'LineWidth', 2);
-% hold on;
-% plot(diff_drive(:, 1), diff_drive(:, 2));
-% no_gps_area = polyshape(gps_lims_points(:, 1), gps_lims_points(:, 2));
+hold on;
+plot(kf_no_gps(:, 1), kf_no_gps(:, 2), "--", "Color", 'r', "LineWidth", 2);
+% hold on
+% no_gps_area = polyshape(gps_lims_points(1:3, 1), gps_lims_points(1:3, 2));
 % plot(no_gps_area, "FaceColor", 'g', "FaceAlpha", 0.1);
 title("Trajectories: Real VS EKF")
 hold off;
-legend('Robot trajectory', 'Waypoints', 'Diff_drive', "Location", 'southoutside');
+legend('Robot trajectory', 'Predicted EKF', 'Corrected EKF', ...
+        'Waypoints', 'EKF no GPS', "Location", 'southoutside');
 
 % f_2 = figure;
 % f_2.Position = [0 0 1000 500];

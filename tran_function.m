@@ -24,8 +24,8 @@ function n_state = tran_function(prev_state, controller_out, robot_params, time)
                                                  "VehicleSpeedHeadingRate");
     % time_res = time(2)-time(1);
     % tspan = time(1):time_res/3:time(2);
-    res_time = seconds(time(2)-time(1));
-    tspan = 0:res_time:res_time;
+%     res_time = seconds(time(2)-time(1));
+    tspan = 0:time(2):time(2);
 
     [t,y] = ode45(@(t,y)derivative(kinematicModel, y, controller_out), tspan, prev_state);
     n_state = [y(end, 1); y(end, 2); y(end, 3)];

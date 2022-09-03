@@ -78,9 +78,9 @@ classdef agentOverviewer
                           agent_b_to_a_x - agent_a_pose(1));
 
              if (dist < agent_a.communication_range)
-                res = [true, range, angle];
+                res = [true, range, angle, agent_b_pose(3)];
             else
-                res = [false, 0, 0];
+                res = [false, 0, 0, 0];
             end
         end
 

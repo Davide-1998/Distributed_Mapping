@@ -37,11 +37,11 @@ classdef utility_functions
 
             % update model and config
             model_lines(3) = sprintf('\t<model name=\"' + agent_id + '\">');
-            model_lines(235) = sprintf('\t\t<topicName> ' + agent_id + ...
+            model_lines(238) = sprintf('\t\t<topicName> ' + agent_id + ...
                                        '/ScanResults </topicName>');
-            model_lines(255) = sprintf('\t\t<commandTopic> /' + ...
+            model_lines(258) = sprintf('\t\t<commandTopic> /' + ...
                                        agent_id + '/vel </commandTopic>');
-            model_lines(261) = sprintf('\t\t<odometryTopic> /' + ...
+            model_lines(264) = sprintf('\t\t<odometryTopic> /' + ...
                                         agent_id + ...
                                         '/odometry </odometryTopic>');
             config_lines(3) = sprintf('\t<name> ' + agent_id + ' </name>');
@@ -84,37 +84,16 @@ classdef utility_functions
             command = command + "generated_models/* " + gazebo_folder;
             system(command);
         end
-
-        function acc = estimate_accelleration(agent, its, desired_vel, vel_type)
-            agent = agent.ros_connect();
-            
-            time = zeros(its, 1);
-            for k=1:its
-                k
-                start_time = now;
-                if vel_type == "linear"
-                    [vel_l, vel_a] = agent.get_current_vels();
-                    agent = agent.set_velocity([desired_vel, 0, 0]);
-                    while round(vel_l(1), 2) < desired_vel
-                        [vel_l, vel_a] = agent.get_current_vels();
-                    end
-                elseif vel_type == "angular"
-                    [vel_l, vel_a] = agent.get_current_vels();
-                    agent = agent.set_velocity([0, 0, 0], [0, 0, desired_vel]);
-                    while round(vel_a(3), 2) < desired_vel
-                        [vel_l, vel_a] = agent.get_current_vels();
-                    end
-                end
-               time(k) = now-start_time
-               agent = agent.set_velocity();
-               while all(round(vel_l, 4) == 0) && all(round(vel_a, 4) == 0)
-                   [vel_l, vel_a] = agent.get_current_vels();
-               end
-            end
-            
-            acc = sum(time)/numel(time);
-
-            disp(["Estimated ", vel_type, " accelleration is ", acc]);
+        
+        function [new_x, new_y] = H_trans_2D_direct(dist_new_old, point_old, rot_old)
+            % Transfer the coordinate of a point from an old coordinate
+            % system to a new one. It is the reciprocal operation of
+            % H_trans_2D
+            rotation = [cos(rot_old) -sin(rot_old); ...
+                        sin(rot_old) cos(rot_old)];
+            res = dist_new_old + (rotation*point_old');
+            new_x = res(1);
+            new_y = res(2);
         end
 
         function [new_x, new_y] = H_trans_2D(d_oo, p_o, r_new)
@@ -133,50 +112,51 @@ classdef utility_functions
             new_y = res(2);
         end
 
-        function xyz_cloud = pre_process_cloud3D(LidarData, lidar_range, ...
-                                                 lidar_origin_height)
+        function [xyz_cloud, ground, pits] = pre_process_cloud3D(LidarData, ...
+                                                                 agent)
             xyz_cloud = [];
+            pits = [];
             cloud_c = 1;
-            for k=1:size(LidarData.Points, 1)
-                accepted_scan = true;
+            if ~isa(LidarData, 'numeric')
+                for k=1:size(LidarData.Points, 1)
 
-                x_c = LidarData.Points(k).X;
-                y_c = LidarData.Points(k).Y;
-                z_c = LidarData.Points(k).Z;
+                    x_c = LidarData.Points(k).X;
+                    y_c = LidarData.Points(k).Y;
+                    z_c = LidarData.Points(k).Z;
 
-                % Check intersection with floor
-                rho = norm([x_c, y_c, z_c]);
+                    rho = norm([x_c, y_c, z_c]);
 
-                if rho < 0.99*lidar_range % It is not the end of the sensor range
-                    theta = real(acos(z_c / rho));
-                    phi = atan2(y_c, x_c);
-
-                    if round(theta, 2) > pi/2 % Ray goes below the horizon line of lidar
-                        % Remove the floor reflection
-                        rho_xy = norm([x_c, y_c]);
-                        x_angle = x_c*cos(phi);
-                        y_angle = y_c*sin(phi);
-                        n_rho = norm([x_angle, y_angle]);
-                        
-                        if z_c < -1.5*lidar_origin_height
-                            accepted_scan = true;
-                        else
-                            accepted_scan = false;
-                        end
-                    end
-
-                    if accepted_scan
+                    if rho < 0.99*agent.lidar_range % It is not the end of the sensor range
                         xyz_cloud(cloud_c, :) = [x_c, y_c, z_c];
                         cloud_c = cloud_c + 1;
                     end
                 end
+            else
+                for k=1:size(LidarData, 1)
+                    rho = norm(LidarData(k, :));
+                    if rho < 0.99*agent.lidar_range
+                        xyz_cloud(cloud_c, :) = LidarData(k, :);
+                        cloud_c = cloud_c + 1;
+                    end
+                end
             end
-            
-            
-            % player = pcplayer([-20, 20], [-20, 20], [-20, 20]);
-            % while isOpen(player)
-            %     view(player, cloud);
-            % end
+
+            t_cloud = pointCloud(xyz_cloud);
+            [idxGround, t_cloud, ground] = segmentGroundSMRF(t_cloud, ...
+                                                             "MaxWindowRadius", 5, ...
+                                                             "SlopeThreshold", 0.07, ...
+                                                             "ElevationThreshold", 0.07);
+
+            condition_to_move = 0.5*agent.wheel_radius + agent.lidar_origin_height;
+            pits_count = 1;
+            for k=1:size(xyz_cloud)               
+                if ground.Location(k, 3) < -1*condition_to_move
+                    pits(pits_count, :) = ground.Location(k, :);
+                    pits_count = pits_count +1;
+                end
+            end
+            t_cloud = removeInvalidPoints(t_cloud);
+            xyz_cloud = t_cloud.Location;
         end
 
         function [ranges, angles] = cartesian_to_polar_2D(matrix)
@@ -203,6 +183,48 @@ classdef utility_functions
                 [new_r, new_a] = utility_functions.cartesian_to_polar_2D(t_cloud);
                 ranges = [ranges; new_r];
                 angles = [angles; new_a];
+            end
+        end
+
+        function nearby_cloud = get_nearby_clouds(agent)
+            nearby_agents = agent.overviewer.any_nearby(agent.id);
+            nearby_cloud = [];
+            if numel(nearby_agents) ~= 0
+                keys = nearby_agents.keys;
+                for id_ag=1:numel(keys)
+                    selected_agent = agent.overviewer.registered_agents(keys{1, id_ag});
+                    
+                    % Last cloud is the most updated representation!
+                    if ~isempty(selected_agent.global_3D_point_cloud)
+                        agent_cloud = cell2mat(selected_agent.global_3D_point_cloud{1, end});
+                    else
+                        disp([selected_agent.id, " has no clouds"])
+                        return;
+                    end
+                    
+                    data = nearby_agents(keys{1, id_ag});
+                    rho = data(1);
+                    angle = data(2);
+                    agent_coord = [rho*cos(angle), rho*sin(angle)];
+                    orient = selected_agent.poses_history(end, 3) - ...
+                             agent.current_relative_pose(3);
+%                     orient = -3.14;
+
+                    % Maybe account for a smart indexing?
+                    local_cloud = [];
+                    for k=1:size(agent_cloud, 1)
+                        agent_points = agent_cloud(k, :);
+                        % agent_points(1:2) = agent_points(1:2);
+                        [nx, ny] = utility_functions.H_trans_2D(agent_coord, ...
+                                                                agent_points(1:2), ...
+                                                                orient);
+                        % local_points = local_points + agent_coord;
+                        local_cloud = [local_cloud; [nx, ny, agent_points(3)]];
+                    end
+                    nearby_cloud = [nearby_cloud; local_cloud];
+                end
+            else
+                return;
             end
         end
 

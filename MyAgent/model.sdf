@@ -219,7 +219,7 @@
           </scan>
           <range>
             <min>0.25</min>
-            <max>15</max> <!-- Was 150 before</end>
+            <max>15</max> <!-- Was 150 before -->
             <resolution>0.01</resolution>
           </range>
           <noise>

@@ -13,40 +13,45 @@
 classdef agent
     properties
         id = "Agent_default";
-        % factory details
+
+        % Factory Details
         wheel_radius = 0.06;
         wheel_separation = 0.24;
+        height = 0.15;
 
+        % Motion
         current_relative_pose = [0; 0; 0];  % x y rotation
         prev_relative_pose = [0; 0; 0];
-        current_linear_vel = 0;
         absolute_pose = [0, 0, 0];
-        current_angular_vel = 0;
+        tracking_EKF;
+        poses_history = [];
+        
+        % Lidar Sensor
         lidar_range = 0;
+        lidar_origin_height = 0.135;
+
         max_lidar_map_range = 0;
+
+        % Communications
         communication_range = 0;
+        known_agents = [];
+        overviewer;
         scanned_data_sub;
         odometry_sub;
         vel_command;
-        
-        lidar_origin_height = 0;
-
-        % SLAM Attributes
-        map_cloud = []; % Cloud 3D representation of map
-        poses_graph = poseGraph3D;
-        prev_tf;
-        
-        % Motion model Parameters
-        estimated_acceleration = 0.1741;
-        last_set_vel_t = 0;
-        vel_desired = 0
-
-        known_agents = [];
-        overviewer;
-
-        no_scans = true;
-        % current_map = [];
         ros_conn = false;
+        
+        % SLAM Attributes
+        global_3D_point_cloud = {}; % Cloud 3D representation of map
+        local_cloud = [];
+        poses_graph = poseGraph3D;
+        err_kf;
+        no_scans = true;
+
+        % Others
+        prev_tf;
+        LidarData;
+        estimated_acceleration = 0.1741;
         slam_builder;
     end
     
@@ -64,7 +69,6 @@ classdef agent
             obj.overviewer = ov;
 
         end
-
         function obj = set_factory_setup(obj, wr, ws)
             obj.wheel_radius = wr;
             obj.wheel_separation = ws;
@@ -107,7 +111,7 @@ classdef agent
             orientation = quat2eul(quat_orientation, 'ZYX');
         end
         function obj = agent(id_, scan_range, current_pose, ...
-                             absolute_p, current_vels, comm_range, ...
+                             absolute_p, comm_range, ...
                              max_lidar_map_range_, lidar_orig_h, est_acc)
             if ~exist("id_", 'var')
                 id_ = "Default_id";
@@ -127,16 +131,8 @@ classdef agent
             if ~exist("absolute_p", 'var')
                 absolute_p = [0, 0, 0];
             end
-            if ~exist("current_vels", 'var')
-                current_vels = [0, 0];
             if ~exist("lidar_orig_h", 'var')
-                lidar_orig_h = 0.105;
-            end
-            elseif numel(current_vels) < 2
-                msg = "Expected 2 values for linear and angular\n" + ...
-                      "Only the linear velocity will be set";
-                disp(msg);
-                current_vels = [current_vels, 0];
+                lidar_orig_h = 0.135;
             end
             if ~exist("max_lidar_map_range_", 'var')
                 max_lidar_map_range_ = scan_range;
@@ -146,12 +142,15 @@ classdef agent
             obj.lidar_range = scan_range;
             obj.communication_range = comm_range;
             obj.max_lidar_map_range = max_lidar_map_range_;
-            obj.current_relative_pose = current_pose;
+            obj = obj.set_current_relative_pose(current_pose);
             obj.absolute_pose = absolute_p;
-            obj.current_linear_vel = current_vels(1);
-            obj.current_angular_vel = current_vels(2);
             obj.lidar_origin_height = lidar_orig_h;
             obj.estimated_acceleration = est_acc;
+            obj.tracking_EKF = trackingEKF(@tran_function, ...
+                                           @measurement_function, ...
+                                           current_pose, ...
+                                           "MeasurementNoise", 0.1, ...
+                                           'ProcessNoise', diag([1,1,1]));
         end
 
         function obj = set_id(obj, new_id)
@@ -180,11 +179,11 @@ classdef agent
             msg.Angular.Y = vel_angular(2);
             msg.Angular.Z = vel_angular(3);
 
-            obj.current_linear_vel = vel_linear(1);
-            obj.current_angular_vel = vel_angular(3);
+            % obj.current_linear_vel = vel_linear(1);
+            % obj.current_angular_vel = vel_angular(3);
 
             send(obj.vel_command, msg);
-            obj.last_set_vel_t = now;
+            % obj.last_set_vel_t = now;
         end
         function obj = ros_connect(obj, agent_id)
             if ~exist('agent_id', 'var')
@@ -210,23 +209,23 @@ classdef agent
         end
         function obj = refine_3D_map(obj)
             prevTF = [];
-            for k=1:size(obj.map_cloud, 1)
-                pcl_wogrd = obj.map_cloud(k);
+            for k=1:size(obj.global_3D_point_cloud, 1)
+                pcl_wogrd = obj.global_3D_point_cloud(k);
                 % pcl_wogrd = pointCloud(local_cloud);
                 % Data downsampling for speed
                 pcl_wogrd_sampled = pcdownsample(pcl_wogrd, 'random', 0.25);
 
                 % Registering point cloud
                 scanAccepted = 1;
-                count = size(obj.map_cloud, 1);
+                count = size(obj.global_3D_point_cloud, 1);
                 if count == 0
                     tform = [];
                 else
                     if count == 1
-                        moving = obj.map_cloud(count);
+                        moving = obj.global_3D_point_cloud(count);
                         tform = pcregisterndt(pcl_wogrd_sampled, moving, 2.5);
                     else
-                        tform = pcregisterndt(pcl_wogrd_sampled, obj.map_cloud(count), 2.5, ...
+                        tform = pcregisterndt(pcl_wogrd_sampled, obj.global_3D_point_cloud(count), 2.5, ...
                             'InitialTransform', prevTF);
                     end
 
@@ -261,85 +260,75 @@ classdef agent
                 disp("Not connected to ROS");
                 return;
             else
-                obj.LidarData = receive(obj.scanned_data_sub, 3);
-                % array_of_collisions = LidarData.Points;
-                local_cloud = utility_functions.pre_process_cloud3D(obj.LidarData, ...
-                                                                    obj.lidar_range, ...
-                                                                    obj.lidar_origin_height);
-                obj.map_cloud = [obj.map_cloud; pointCloud(local_cloud)];
+                data = receive(obj.scanned_data_sub, 3);
+                temp_cloud = utility_functions.pre_process_cloud3D(data, ...
+                                                                        obj);
+                % Correct noise KF goes here!
                 
-                [ranges, angles] = utility_functions.cartesian_to_polar_2D(local_cloud);
-
-                %{
-                local_cloud = local_cloud + obj.current_relative_pose(1:3);
-                disp(obj.current_relative_pose)
-                obj.map_cloud = [obj.map_cloud; local_cloud];
-
-                occupied_2D = [];
-                ranges = [];
-                angles = [];
+                % Clouds for nearby agents here (before the for cycle)!
+                nearby_cloud = utility_functions.get_nearby_clouds(obj);
+                obj.local_cloud = [temp_cloud; nearby_cloud];
                 
-                for k=1:size(local_cloud, 1)
-                    if local_cloud(k, 3) < 1.1*obj.lidar_origin_height
-                        occupied_2D(k, :) = local_cloud(k, 1:2);
-                        x_local = local_cloud(k, 1);
-                        y_local = local_cloud(k, 2);
-                        theta = atan2(y_local, x_local);
-                        rho = norm([x_local, y_local]);
-                        ranges = [ranges, rho];
-                        angles = [angles, theta];
-                    end
-                end
-                %}
+                % Fix wrt other scans
+                num_clouds = size(obj.global_3D_point_cloud, 2);
+                if num_clouds >= 1
+                    last_cloud = cell2mat(obj.global_3D_point_cloud{1, end});
+                    fixed_cloud = pointCloud(last_cloud);
+                    mov_cloud = pointCloud(obj.local_cloud);
+                    fixed_cloud_down = pcdownsample(fixed_cloud, 'gridAverage', 0.2);
+                    mov_cloud_down = pcdownsample(mov_cloud, 'gridAverage', 0.2);
 
-                % res_step = LidarData.AngleIncrement;
-                % max_range = LidarData.RangeMax;
+                    tform = pcregistericp(mov_cloud_down, ...
+                                          fixed_cloud_down, ...
+                                          'Metric', ...
+                                          'pointToPlane', ...
+                                          'Extrapolate', true);
+                    cloud_align = pctransform(mov_cloud, tform);
+                    
+                    cloud_trans = pcmerge(fixed_cloud, cloud_align, 0.015);
+                    cloud_wrt_rel_origin = cloud_trans.Location;
+
+%                     cloud_wrt_rel_origin = zeros(size(obj.local_cloud, 1), 3);
+%                     for k=1:size(obj.local_cloud, 1)
+%                         ag_point_coord = obj.local_cloud(k, :);
+%                         [nx, ny] = utility_functions.H_trans_2D(obj.current_relative_pose(1:2), ...                                                             ag_point_coord(1:2), ...
+%                             obj.current_relative_pose(3));
+%                         cloud_wrt_rel_origin(k, :) = [nx, ny, ag_point_coord(3)];
+%                         if k==105
+%                             disp(["old coord: ", ag_point_coord, "New_coord", [nx, ny]]);
+%                         end
+%                     end
+
+                else
+                    cloud_wrt_rel_origin = obj.local_cloud;
+                end
                 
-                % Due to simulated sensor, data acquisition may vary
-                % Need a correction parameter
-                %{
-                if ~exist('rotation_adjust', 'var')
-                    rotation_adjust = 0;
-                end
+                obj.global_3D_point_cloud{num_clouds+1} = num2cell(cloud_wrt_rel_origin);
 
-                ranges = zeros(numel(array_of_collisions, 1));
-                angles = zeros(numel(array_of_collisions), 1);
-                for k = 1:numel(array_of_collisions)
-                        theta = rotation_adjust + (k-1)*res_step;
-                        angles(k, 1) = theta;
-                        rho = array_of_collisions(k);
-                        ranges(k, 1) = rho;
-                end
-                %}
-
-                % Check if any agent is nearby
-                [nearby_ranges, nearby_angles] = utility_functions.agent_data_to_local_system(obj);
+%                 nearby_cloud = utility_functions.nearby_cloud_update(obj);
                 
-                % Update with the data received by the other agents
-                if numel(nearby_ranges) > 0 && numel(nearby_angles) > 0
-                    ranges = [ranges; nearby_ranges];
-                    angles = [angles; nearby_angles];
-                end
-
-                % Update the scan results
-                scan_in = lidarScan(ranges, angles);
-                if obj.no_scans == true
-                    obj.no_scans = false;
-                end
-                addScan(obj.slam_builder, scan_in, obj.current_relative_pose(1:3));
-
-                [scans, poses] = scansAndPoses(obj.slam_builder);
+%                 local_player = pcplayer([-20, 20], [-20, 20], [-20, 20]);
+%                 
+% 
+%                 while isOpen(local_player)
+%                     view(local_player, local_cloud);
+%                 end
             end
-
+            obj.overviewer.registered_agents(obj.id) = obj;
         end
+
         function obj = set_current_relative_pose(obj, pose)
+            validateattributes(pose, {'numeric'}, {'size', [1, 3]});
+
             obj.prev_relative_pose = obj.current_relative_pose;
             obj.current_relative_pose = pose;
             obj.absolute_pose = obj.absolute_pose + pose;
             if ~isempty(obj.overviewer)
                 obj.overviewer.registered_agents(obj.id) = obj;
             end
+            obj.poses_history = [obj.poses_history; pose];
         end
+
         function [pthObj, solnInfo] = compute_roadmap(obj)
             % Take the readings
             [scans, poses] = scansAndPoses(obj.slam_builder);
@@ -420,18 +409,40 @@ classdef agent
             initial_pose = obj.get_current_pose("XYR");
 
             while dist > goal_th
+                [v_l, v_a] = obj.get_current_vels();
                 [new_v, new_a] = controller(current_pose);
                 obj = obj.set_velocity([new_v 0 0], [0, 0, new_a]);
+                start_time = datetime('now');
 
-                new_pose = obj.get_current_pose("XYR");
-                
+                if obj.overviewer.is_gps_available(new_pose(1:2))
+                    disp("GPS ON")
                 [new_x, new_y] = utility_functions.H_trans_2D(initial_pose(1:2), ...
                                                               new_pose(1:2), ...
                                                               obj.absolute_pose(3));
+                [wr, ws] = obj.get_factory_setup();
+
                 theta = new_pose(3) - initial_pose(3);
-
                 current_pose = [new_x, new_y, theta];
+                
+                now_time = datetime('now');
+                elapsed_time = seconds(now_time - start_time);
+                est_pose = obj.tracking_EKF.predict([new_v, new_a], ...
+                                                    [wr, ws], ...
+                                                    [0, elapsed_time]);
+                x_corr = obj.tracking_EKF.correct(current_pose, ...
+                                                  [new_v, new_a], ...
+                                                  [wr, ws], ...
+                                                  [0, elapsed_time]);
 
+                else
+                    disp("GPS OFF - KF in use");
+                    now_time = datetime('now');
+                    elpsed_time = seconds(now_time - start_time);
+                    est_pose = obj.tracking_EKF.predict([new_v, new_a], ...
+                                                        [wr, ws], ...
+                                                        [0, elapsed_time]);
+                    current_pose = est_pose;
+                end
 
                 dist = utility_functions.euclidean_2D(current_pose, ...
                                                       goal_pose);
@@ -470,11 +481,11 @@ classdef agent
 
             obj = obj.refine_3D_map();
             
-            player = pcplayer([-20, +20], [-20, +20], [-10, 10]);
+            player = pcplayer([-40, +40], [-40, +40], [-40, 40]);
             my_cloud_ag = [];
             nodesPositions = nodes(obj.poses_graph);
-            for k=1:numel(obj.map_cloud)
-                t_cloud = obj.map_cloud(k).Location;
+            for k=1:numel(obj.global_3D_point_cloud)
+                t_cloud = obj.global_3D_point_cloud(k).Location;
                 t_pose_angle = quat2eul(nodesPositions(k, 4:end));
                 t_pose = [nodesPositions(k, 1:2), t_pose_angle(3)];
                 t_cloud = t_cloud + t_pose;
