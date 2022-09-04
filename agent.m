@@ -28,9 +28,13 @@ classdef agent
         
         % Lidar Sensor
         lidar_range = 0;
+        hz_resolution = 360;
+        vt_resolution = 16;
+        minmax_hz_angles = [-3.14, 3.14];
+        minmax_vt_angles = [-0.26, 0.26];
         lidar_origin_height = 0.135;
-
         max_lidar_map_range = 0;
+        expected_input_size = [5760, 3];
 
         % Communications
         communication_range = 0;
@@ -45,7 +49,7 @@ classdef agent
         global_3D_point_cloud = {}; % Cloud 3D representation of map
         local_cloud = [];
         poses_graph = poseGraph3D;
-        err_kf;
+        err_KF;
         no_scans = true;
 
         % Others
@@ -56,23 +60,64 @@ classdef agent
     end
     
     methods
+        function obj = set_lidar_parameters(obj, range, sensor_height, hz_res, ...
+                                            vt_res, hz_angles, vt_angles, ...
+                                            max_render_distance)
+
+            if ~exist('range', 'var'); range=10; end
+            if ~exist('sensor_height', 'var'); sensor_height=0.135; end
+            if ~exist('hz_res', 'var'); hz_res=360; end
+            if ~exist('vt_res', 'var'); vt_res=16; end
+            if ~exist('hz_angles', 'var'); hz_angles=[-3.14, 3.14]; end
+            if ~exist('vt_angles', 'var'); vt_angles=[-0.26, 0.26]; end
+            if ~exist('max_render_distance', 'var'); max_render_distance=range*2; end
+
+            obj.lidar_range = range;
+            obj.hz_resolution = hz_res;
+            obj.vt_resolution = vt_res;
+            obj.minmax_hz_angles = hz_angles;
+            obj.minmax_vt_angles = vt_angles;
+            obj.lidar_origin_height = sensor_height;
+            obj.max_lidar_map_range = max_render_distance;
+
+            obj.expected_input_size = [hz_res*vt_res, 3];
+        end
+
+        function obj = initialize_err_KF(obj, meas_cov, proc_cov)
+            if ~exist('meas_cov', 'var'); meas_cov=ones(1, 3); end
+            if ~exist('proc_cov', 'var'); proc_cov=zeros(1, 3); end
+            if size(meas_cov, 2) ~= 3 || size(proc_cov, 2) ~= 3
+                error("Input argument must be 3D");
+            end
+            
+            R = diag(meas_cov);
+            Q = diag(proc_cov);
+
+            obj.err_KF = KF(R, Q);
+        end
+
         function obj = set_lidar_origin_height(obj, h)
             obj.lidar_origin_height = h;
         end
+
         function obj = set_max_lidar_map(obj, value)
             obj.max_lidar_map_range = value;
         end
+
         function obj = set_slam_builder(obj, slam_b)
             obj.slam_builder = slam_b;
         end
+
         function obj = set_overviewer(obj, ov)
             obj.overviewer = ov;
 
         end
+
         function obj = set_factory_setup(obj, wr, ws)
             obj.wheel_radius = wr;
             obj.wheel_separation = ws;
         end
+
         function [wr, ws] = get_factory_setup(obj)
             wr = obj.wheel_radius;
             ws = obj.wheel_separation;
@@ -261,9 +306,19 @@ classdef agent
                 return;
             else
                 data = receive(obj.scanned_data_sub, 3);
+                
+                data_in = [data.Points(:).X; data.Points(:).Y; data.Points(:).Z];
+                
+                % Correct noise KF
+                [data_out, updated_kf] = obj.err_KF.train(data_in);
+                obj.err_KF = updated_kf;
+                
+                data_out = data_out';
+                
+                data = (data_in' + data_out)/2;
+
                 temp_cloud = utility_functions.pre_process_cloud3D(data, ...
-                                                                        obj);
-                % Correct noise KF goes here!
+                                                                   obj);
                 
                 % Clouds for nearby agents here (before the for cycle)!
                 nearby_cloud = utility_functions.get_nearby_clouds(obj);
@@ -275,8 +330,8 @@ classdef agent
                     last_cloud = cell2mat(obj.global_3D_point_cloud{1, end});
                     fixed_cloud = pointCloud(last_cloud);
                     mov_cloud = pointCloud(obj.local_cloud);
-                    fixed_cloud_down = pcdownsample(fixed_cloud, 'gridAverage', 0.2);
-                    mov_cloud_down = pcdownsample(mov_cloud, 'gridAverage', 0.2);
+                    fixed_cloud_down = pcdownsample(fixed_cloud, 'gridAverage', 0.5);
+                    mov_cloud_down = pcdownsample(mov_cloud, 'gridAverage', 0.5);
 
                     tform = pcregistericp(mov_cloud_down, ...
                                           fixed_cloud_down, ...
@@ -288,33 +343,16 @@ classdef agent
                     cloud_trans = pcmerge(fixed_cloud, cloud_align, 0.015);
                     cloud_wrt_rel_origin = cloud_trans.Location;
 
-%                     cloud_wrt_rel_origin = zeros(size(obj.local_cloud, 1), 3);
-%                     for k=1:size(obj.local_cloud, 1)
-%                         ag_point_coord = obj.local_cloud(k, :);
-%                         [nx, ny] = utility_functions.H_trans_2D(obj.current_relative_pose(1:2), ...                                                             ag_point_coord(1:2), ...
-%                             obj.current_relative_pose(3));
-%                         cloud_wrt_rel_origin(k, :) = [nx, ny, ag_point_coord(3)];
-%                         if k==105
-%                             disp(["old coord: ", ag_point_coord, "New_coord", [nx, ny]]);
-%                         end
-%                     end
-
                 else
                     cloud_wrt_rel_origin = obj.local_cloud;
                 end
                 
                 obj.global_3D_point_cloud{num_clouds+1} = num2cell(cloud_wrt_rel_origin);
-
-%                 nearby_cloud = utility_functions.nearby_cloud_update(obj);
-                
-%                 local_player = pcplayer([-20, 20], [-20, 20], [-20, 20]);
-%                 
-% 
-%                 while isOpen(local_player)
-%                     view(local_player, local_cloud);
-%                 end
             end
-            obj.overviewer.registered_agents(obj.id) = obj;
+            
+            if ~isempty(obj.overviewer)
+                obj.overviewer.registered_agents(obj.id) = obj;
+            end
         end
 
         function obj = set_current_relative_pose(obj, pose)

@@ -117,6 +117,7 @@ classdef utility_functions
             xyz_cloud = [];
             pits = [];
             cloud_c = 1;
+            rho_th = 0.95;
             if ~isa(LidarData, 'numeric')
                 for k=1:size(LidarData.Points, 1)
 
@@ -126,7 +127,7 @@ classdef utility_functions
 
                     rho = norm([x_c, y_c, z_c]);
 
-                    if rho < 0.99*agent.lidar_range % It is not the end of the sensor range
+                    if rho < rho_th*agent.lidar_range % It is not the end of the sensor range
                         xyz_cloud(cloud_c, :) = [x_c, y_c, z_c];
                         cloud_c = cloud_c + 1;
                     end
@@ -134,13 +135,13 @@ classdef utility_functions
             else
                 for k=1:size(LidarData, 1)
                     rho = norm(LidarData(k, :));
-                    if rho < 0.99*agent.lidar_range
+                    if rho < rho_th*agent.lidar_range
                         xyz_cloud(cloud_c, :) = LidarData(k, :);
                         cloud_c = cloud_c + 1;
                     end
                 end
             end
-
+            disp(size(xyz_cloud))
             t_cloud = pointCloud(xyz_cloud);
             [idxGround, t_cloud, ground] = segmentGroundSMRF(t_cloud, ...
                                                              "MaxWindowRadius", 5, ...
@@ -187,8 +188,13 @@ classdef utility_functions
         end
 
         function nearby_cloud = get_nearby_clouds(agent)
-            nearby_agents = agent.overviewer.any_nearby(agent.id);
             nearby_cloud = [];
+
+            if isempty(agent.overviewer)
+                return;
+            end
+            nearby_agents = agent.overviewer.any_nearby(agent.id);
+            
             if numel(nearby_agents) ~= 0
                 keys = nearby_agents.keys;
                 for id_ag=1:numel(keys)

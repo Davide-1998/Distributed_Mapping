@@ -12,18 +12,18 @@ classdef KF
     end
 
     methods
-        function obj = KF(X, A, P, Q, R, H, B)
+        function obj = KF(R, Q, X, A, P, H, B)
             if ~exist('X', 'var')
                 disp("No initial state setted"); 
             else
                 obj.current_state_est = X;
             end
-            if ~exist('A', 'var'); A = eye(2); end
-            if ~exist('P', 'var'); P = eye(2); end
-            if ~exist('Q', 'var'); Q = zeros(2); end
-            if ~exist('R', 'var'); R = eye(2); end
-            if ~exist('H', 'var'); H = eye(2); end
-            if ~exist('B', 'var'); B = zeros(2); end
+            if ~exist('A', 'var'); A = eye(3); end
+            if ~exist('P', 'var'); P = eye(3); end
+            if ~exist('Q', 'var'); Q = zeros(3); end
+            if ~exist('R', 'var'); R = eye(3); end
+            if ~exist('H', 'var'); H = eye(3); end
+            if ~exist('B', 'var'); B = zeros(3); end
             
             obj.state_transition_matrix = A;
             obj.state_covariance = P;
@@ -34,17 +34,24 @@ classdef KF
         end
 
         function [new_state, obj] = predict(obj, meas_in)
-            if ~exist('meas_in', 'var'); meas_in = zeros(1, 2); end
-            new_state = (obj.state_transition_matrix*obj.current_state_est) + ...
-                        obj.input_matrix*meas_in;
-            obj.current_state_est = new_state;
+            if ~exist('meas_in', 'var'); meas_in = zeros(1, 3); end
+            if ~isempty(obj.current_state_est)
+                new_state = (obj.state_transition_matrix*obj.current_state_est) + ...
+                             obj.input_matrix*meas_in;
+                obj.current_state_est = new_state;
 
-            new_sc = obj.state_transition_matrix*obj.state_covariance*(obj.state_transition_matrix') ...
-                     + obj.proc_noise_cov;
-            obj.state_covariance = new_sc;
+                new_sc = obj.state_transition_matrix*obj.state_covariance*(obj.state_transition_matrix') ...
+                         + obj.proc_noise_cov;
+                obj.state_covariance = new_sc;
+            else
+                obj.current_state_est = inv(obj.ob_matrix) * meas_in;
+                new_state = obj.current_state_est;
+                
+                obj.state_covariance = inv(obj.ob_matrix) * obj.meas_noise_cov * inv(obj.ob_matrix)';
+            end
         end
 
-        function obj = train(obj, new_meas)
+        function [curr_state, obj] = train(obj, new_meas)
             [new_est, obj] = obj.predict(new_meas);
 
             kalmann_gain = obj.state_covariance * (obj.ob_matrix') * ...
