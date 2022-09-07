@@ -85,15 +85,14 @@ classdef utility_functions
             system(command);
         end
         
-        function [new_x, new_y] = H_trans_2D_direct(dist_new_old, point_old, rot_old)
+        function res = H_trans_2D_new(dist_new_old, point_old, rot_old)
             % Transfer the coordinate of a point from an old coordinate
             % system to a new one. It is the reciprocal operation of
             % H_trans_2D
             rotation = [cos(rot_old) -sin(rot_old); ...
                         sin(rot_old) cos(rot_old)];
-            res = dist_new_old + (rotation*point_old');
-            new_x = res(1);
-            new_y = res(2);
+            rotation_res = rotation*point_old';
+            res = dist_new_old + rotation_res';
         end
 
         function [new_x, new_y] = H_trans_2D(d_oo, p_o, r_new)
@@ -141,7 +140,6 @@ classdef utility_functions
                     end
                 end
             end
-            disp(size(xyz_cloud))
             t_cloud = pointCloud(xyz_cloud);
             [idxGround, t_cloud, ground] = segmentGroundSMRF(t_cloud, ...
                                                              "MaxWindowRadius", 5, ...

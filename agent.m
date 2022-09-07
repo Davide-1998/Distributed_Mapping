@@ -20,9 +20,10 @@ classdef agent
         height = 0.15;
 
         % Motion
-        current_relative_pose = [0; 0; 0];  % x y rotation
-        prev_relative_pose = [0; 0; 0];
+        current_est_pose = [0, 0, 0];  % x y rotation
+        prev_est_pose = [0, 0, 0];
         absolute_pose = [0, 0, 0];
+        absolute_origin = [0, 0, 0];        
         tracking_EKF;
         poses_history = [];
         
@@ -46,17 +47,18 @@ classdef agent
         ros_conn = false;
         
         % SLAM Attributes
+        slam_builder;
         global_3D_point_cloud = {}; % Cloud 3D representation of map
         local_cloud = [];
         poses_graph = poseGraph3D;
         err_KF;
+        kf_th = 10;
         no_scans = true;
 
         % Others
         prev_tf;
         LidarData;
         estimated_acceleration = 0.1741;
-        slam_builder;
     end
     
     methods
@@ -110,7 +112,6 @@ classdef agent
 
         function obj = set_overviewer(obj, ov)
             obj.overviewer = ov;
-
         end
 
         function obj = set_factory_setup(obj, wr, ws)
@@ -156,8 +157,9 @@ classdef agent
             orientation = quat2eul(quat_orientation, 'ZYX');
         end
         function obj = agent(id_, scan_range, current_pose, ...
-                             absolute_p, comm_range, ...
-                             max_lidar_map_range_, lidar_orig_h, est_acc)
+                             absolute_o, comm_range, ...
+                             max_lidar_map_range_, lidar_orig_h, est_acc, ...
+                             kf_threshold)
             if ~exist("id_", 'var')
                 id_ = "Default_id";
             end
@@ -173,8 +175,8 @@ classdef agent
             if ~exist("current_pose", 'var')
                 current_pose = [0, 0, 0];
             end
-            if ~exist("absolute_p", 'var')
-                absolute_p = [0, 0, 0];
+            if ~exist("absolute_o", 'var')
+                absolute_o = [0, 0, 0];
             end
             if ~exist("lidar_orig_h", 'var')
                 lidar_orig_h = 0.135;
@@ -182,13 +184,16 @@ classdef agent
             if ~exist("max_lidar_map_range_", 'var')
                 max_lidar_map_range_ = scan_range;
             end
+            if ~exist("kf_threshold", 'var')
+                kf_threshold = 10;
+            end
 
             obj.id = id_;
             obj.lidar_range = scan_range;
             obj.communication_range = comm_range;
             obj.max_lidar_map_range = max_lidar_map_range_;
-            obj = obj.set_current_relative_pose(current_pose);
-            obj.absolute_pose = absolute_p;
+            obj = obj.set_current_est_pose(current_pose);
+            obj.absolute_origin = absolute_o;
             obj.lidar_origin_height = lidar_orig_h;
             obj.estimated_acceleration = est_acc;
             obj.tracking_EKF = trackingEKF(@tran_function, ...
@@ -196,6 +201,7 @@ classdef agent
                                            current_pose, ...
                                            "MeasurementNoise", 0.1, ...
                                            'ProcessNoise', diag([1,1,1]));
+            obj.kf_th = kf_threshold;
         end
 
         function obj = set_id(obj, new_id)
@@ -241,14 +247,12 @@ classdef agent
             od_sub = utility_functions.subscriber_to_topic(od_topic);
 
             vel_topic = strcat('/', agent_id, '/vel');
-            % LidarData = receive(scan_sub, 3);
 
             obj.scanned_data_sub = scan_sub;
             obj.odometry_sub = od_sub;
             obj.vel_command = rospublisher(vel_topic);
             obj.ros_conn = true;
-            obj.slam_builder = lidarSLAM(10, ...
-                                         obj.max_lidar_map_range);
+            obj.slam_builder = lidarSLAM(10, obj.max_lidar_map_range);
             obj.slam_builder.LoopClosureThreshold = 210;  
             obj.slam_builder.LoopClosureSearchRadius = 5;
         end
@@ -300,7 +304,10 @@ classdef agent
             end
         end
 
-        function obj = compute_map(obj, rotation_adjust)
+        function obj = compute_map(obj, mov_th)
+            if ~exist('mov_th', 'var')
+                mov_th = 5;
+            end
             if obj.ros_conn == false
                 disp("Not connected to ROS");
                 return;
@@ -309,45 +316,106 @@ classdef agent
                 
                 data_in = [data.Points(:).X; data.Points(:).Y; data.Points(:).Z];
                 
-                % Correct noise KF
-                [data_out, updated_kf] = obj.err_KF.train(data_in);
-                obj.err_KF = updated_kf;
-                
-                data_out = data_out';
-                
-                data = (data_in' + data_out)/2;
+                num_clouds = size(obj.global_3D_point_cloud, 2);
+                if num_clouds > obj.kf_th
+                    % Correct noise KF
+                    [data_out, updated_kf] = obj.err_KF.train(data_in);
+                    obj.err_KF = updated_kf;
+                    data_out = data_out';
+                    data = (data_in' + data_out)/2;
+                end
 
-                temp_cloud = utility_functions.pre_process_cloud3D(data, ...
-                                                                   obj);
-                
+                data = data_in';
+                [temp_cloud, ~, pits] = utility_functions.pre_process_cloud3D(data, ...
+                                                                           obj);
+                pose = obj.current_est_pose;
+                temp_cloud(:, 1:2) = utility_functions.H_trans_2D_new(pose(1:2), ...
+                                                                      temp_cloud(:, 1:2), ...
+                                                                      pose(3));
                 % Clouds for nearby agents here (before the for cycle)!
                 nearby_cloud = utility_functions.get_nearby_clouds(obj);
                 obj.local_cloud = [temp_cloud; nearby_cloud];
-                
-                % Fix wrt other scans
-                num_clouds = size(obj.global_3D_point_cloud, 2);
-                if num_clouds >= 1
-                    last_cloud = cell2mat(obj.global_3D_point_cloud{1, end});
-                    fixed_cloud = pointCloud(last_cloud);
-                    mov_cloud = pointCloud(obj.local_cloud);
-                    fixed_cloud_down = pcdownsample(fixed_cloud, 'gridAverage', 0.5);
-                    mov_cloud_down = pcdownsample(mov_cloud, 'gridAverage', 0.5);
 
+                num_clouds = size(obj.global_3D_point_cloud, 2);
+                % Fix wrt other scans
+                %{
+                if num_clouds >= 1
+                    first_cloud = cell2mat(obj.global_3D_point_cloud{1, end});
+                    cloud_wrt_rel_origin = obj.local_cloud;
+                    cloud_wrt_rel_origin(:, 1:2) = cloud_wrt_rel_origin(:, 1:2) - ... 
+                                                   obj.current_est_pose(1:2);
+                    cloud_wrt_rel_origin = [cloud_wrt_rel_origin; first_cloud];
+                    
+                    %{
+                    first_pose = obj.poses_history(1, :);
+                    rot = obj.current_est_pose(3) - first_pose(3);
+
+                    cloud_wrt_rel_origin = obj.local_cloud;
+                    dist = obj.current_est_pose - first_pose;
+                    for k=1:size(obj.local_cloud, 1)
+                        [nx, ny] = utility_functions.H_trans_2D( ...
+                                                        dist(1:2), ...
+                                                        obj.local_cloud(k, 1:2), ...
+                                                        dist(3));
+                        cloud_wrt_rel_origin(k, 1:2) = [nx, ny];
+                    end
+                    
+                    cloud_wrt_rel_origin = [cloud_wrt_rel_origin; first_cloud];
+                    %}
+                    %{
+                    fixed_cloud = pointCloud(first_cloud);
+                    mov_cloud = pointCloud(obj.local_cloud);
+                    fixed_cloud_down = pcdownsample(fixed_cloud, 'gridAverage', 0.1);
+                    mov_cloud_down = pcdownsample(mov_cloud, 'gridAverage', 0.1);
+                    
+                    rot_mat = [cos(rot), -sin(rot), 0; ...
+                               sin(rot), cos(rot), 0; ...
+                               0, 0, 1];
+                    trans = [obj.current_est_pose(1:2), 0];
+
+                    tf = rigid3d(rot_mat, trans);
+                    
                     tform = pcregistericp(mov_cloud_down, ...
                                           fixed_cloud_down, ...
                                           'Metric', ...
                                           'pointToPlane', ...
-                                          'Extrapolate', true);
+                                          'Extrapolate', true, ...
+                                          'InitialTransform', tf);
+
                     cloud_align = pctransform(mov_cloud, tform);
-                    
-                    cloud_trans = pcmerge(fixed_cloud, cloud_align, 0.015);
+                    cloud_trans = pcmerge(fixed_cloud, cloud_align, 0.03);
                     cloud_wrt_rel_origin = cloud_trans.Location;
+                    %}
 
                 else
                     cloud_wrt_rel_origin = obj.local_cloud;
+                    cloud_wrt_rel_origin(:, 1:2) = cloud_wrt_rel_origin(:, 1:2) - ... 
+                                                   obj.current_est_pose(1:2);
                 end
+                %}
                 
+                if num_clouds > 1
+                    cloud_wrt_rel_origin = [cell2mat(obj.global_3D_point_cloud{end}); ... 
+                                            obj.local_cloud];
+                else
+                    cloud_wrt_rel_origin = obj.local_cloud;
+                end
+
                 obj.global_3D_point_cloud{num_clouds+1} = num2cell(cloud_wrt_rel_origin);
+                full_occupancy = [cloud_wrt_rel_origin; pits];
+                
+                % 1.2 times agent height !!
+                [ranges, angles] = utility_functions.cartesian_to_polar_2D(full_occupancy);
+                
+                occupancy = [ranges, angles];
+                distance = norm(obj.current_est_pose(1:2));
+                occupancy = occupancy(abs(occupancy(:, 1) - distance) < mov_th, :);
+
+                % Add scans
+                tic
+                scan_in = lidarScan(occupancy(:, 1), occupancy(:, 2));
+                addScan(obj.slam_builder, scan_in, obj.current_est_pose);
+                toc
             end
             
             if ~isempty(obj.overviewer)
@@ -355,12 +423,12 @@ classdef agent
             end
         end
 
-        function obj = set_current_relative_pose(obj, pose)
+        function obj = set_current_est_pose(obj, pose)
             validateattributes(pose, {'numeric'}, {'size', [1, 3]});
 
-            obj.prev_relative_pose = obj.current_relative_pose;
-            obj.current_relative_pose = pose;
-            obj.absolute_pose = obj.absolute_pose + pose;
+            obj.prev_est_pose = obj.current_est_pose;
+            obj.current_est_pose = pose;
+            obj.absolute_pose = obj.absolute_origin + pose;
             if ~isempty(obj.overviewer)
                 obj.overviewer.registered_agents(obj.id) = obj;
             end
@@ -377,7 +445,7 @@ classdef agent
             occMap.FreeThreshold = 0.50;
             
             % Generate search space and node validator
-            now_pose = obj.current_relative_pose;
+            now_pose = obj.current_est_pose;
             
             low_bound_x = now_pose(1); % - obj.slam_builder.MaxLidarRange;
             high_bound_x = now_pose(1) + obj.slam_builder.MaxLidarRange;
@@ -435,7 +503,7 @@ classdef agent
             controller.MaxAngularVelocity = 10;
             % controller.LookaheadDistance = 0.3;
 
-            current_pose = obj.current_relative_pose; % path.States(1, :);
+            current_pose = obj.current_est_pose; % path.States(1, :);
             goal_pose = path.States(end, :);
             disp(["State start: ", current_pose])
             disp(["State end: ", goal_pose])
@@ -488,7 +556,7 @@ classdef agent
                 % initial_pose = new_pose;
                 disp([current_pose, "Dist: ", dist])
             end
-            obj = obj.set_current_relative_pose(current_pose);
+            obj = obj.set_current_est_pose(current_pose);
         end
 
         function [] = do_slam(obj, iterations, correction_angle)
@@ -510,28 +578,20 @@ classdef agent
             obj = obj.set_velocity([0 0 0]);  % Stop agent after slamming
             obj.show_map();
         end
+
         function [] = show_map(obj)
             figure;
             title("Occupancy Map");
             [scans, poses] = scansAndPoses(obj.slam_builder);
             occMap = buildMap(scans, poses, 10, obj.max_lidar_map_range);
             show(occMap);
-
-            obj = obj.refine_3D_map();
             
-            player = pcplayer([-40, +40], [-40, +40], [-40, 40]);
-            my_cloud_ag = [];
-            nodesPositions = nodes(obj.poses_graph);
-            for k=1:numel(obj.global_3D_point_cloud)
-                t_cloud = obj.global_3D_point_cloud(k).Location;
-                t_pose_angle = quat2eul(nodesPositions(k, 4:end));
-                t_pose = [nodesPositions(k, 1:2), t_pose_angle(3)];
-                t_cloud = t_cloud + t_pose;
-                my_cloud_ag = [my_cloud_ag; t_cloud];
-            end
+            my_cloud_ag = pointCloud(cell2mat(obj.global_3D_point_cloud{1, end}));
+            player = pcplayer(my_cloud_ag.XLimits, my_cloud_ag.YLimits, my_cloud_ag.ZLimits);
+          
             while isOpen(player) 
                 view(player, my_cloud_ag);           
-             end 
+            end
         end
     end
 end
