@@ -48,11 +48,13 @@ classdef agent
         % SLAM Attributes
         slam_builder;
         global_3D_point_cloud = {}; % Cloud 3D representation of map
+        global_occupancy;
         local_cloud = [];
         poses_graph = poseGraph3D;
         err_KF;
         kf_th = 10;
         no_scans = true;
+        local_scans = {};
 
         % Others
         prev_tf;
@@ -327,37 +329,67 @@ classdef agent
                 data = data_in';
                 [temp_cloud, ~, pits] = utility_functions.pre_process_cloud3D(data, ...
                                                                               obj);
-                pose = obj.current_est_pose;
-                temp_cloud(:, 1:2) = utility_functions.H_trans_2D_new(pose(1:2), ...
-                                                                      temp_cloud(:, 1:2), ...
-                                                                      pose(3));
-                % Clouds for nearby agents here (before the for cycle)!
-                nearby_cloud = utility_functions.get_nearby_clouds(obj);
-                obj.local_cloud = [temp_cloud; nearby_cloud];
+                obj.local_cloud = temp_cloud;
+
+                % Make occupancy map
+                full_occupancy = [temp_cloud; pits];
+                [ranges, angles] = utility_functions.cartesian_to_polar_2D(full_occupancy);          
+                scan_in = lidarScan(ranges, angles);
+                
+                obj.local_scans{end+1} = scan_in; % New
+
+                addScan(obj.slam_builder, scan_in, obj.current_est_pose);
+                % [scans, poses] = scansAndPoses(obj.slam_builder);
+                
+                occMap = buildMap(obj.local_scans, obj.poses_history, 10, obj.max_lidar_map_range);
+
+                obj.global_occupancy = occMap;
+                
+                obj.local_cloud(:, 1:2) = utility_functions.H_trans_2D_new(obj.current_est_pose(1:2), ...
+                                                                           temp_cloud(:, 1:2), ...
+                                                                           obj.current_est_pose(3));
+                
+                % Clouds from nearby agents
+                data_n = utility_functions.get_nearby_data(obj);
+                if ~isempty(data_n.nearby_cloud)
+                    obj.local_cloud = [obj.local_cloud; data_n.nearby_cloud];
+                end
+                if ~isempty(data_n.scans)
+                    scans_n = data_n.scans;
+                    poses_n = data_n.poses;
+                    
+                    scans = obj.local_scans;
+                    poses = obj.poses_history;
+                    
+                    for k=1:size(scans_n, 2)
+                        scans{end+k} = scans_n{1, k};
+                    end
+                    poses = [poses; poses_n];
+
+                    obj.global_occupancy = buildMap(scans, poses, 10, obj.max_lidar_map_range);
+                    
+                end
 
                 num_clouds = size(obj.global_3D_point_cloud, 2);
                 
                 if num_clouds > 1
-                    cloud_wrt_rel_origin = [cell2mat(obj.global_3D_point_cloud{end}); ... 
-                                            obj.local_cloud];
-                else
-                    cloud_wrt_rel_origin = obj.local_cloud;
+                    obj.local_cloud = [cell2mat(obj.global_3D_point_cloud{end}); ... 
+                                       obj.local_cloud];
                 end
 
-                obj.global_3D_point_cloud{num_clouds+1} = num2cell(cloud_wrt_rel_origin);
-                full_occupancy = [cloud_wrt_rel_origin; pits];
-                
-                % 1.2 times agent height !!
-                [ranges, angles] = utility_functions.cartesian_to_polar_2D(full_occupancy);
-                
-                occupancy = [ranges, angles];
-%                 distance = norm(obj.current_est_pose(1:2));
-%                 occupancy = occupancy(abs(occupancy(:, 1) - distance) < mov_th, :);
 
                 % Add scans
-                scan_in = lidarScan(occupancy(:, 1), occupancy(:, 2));
-                addScan(obj.slam_builder, scan_in, obj.current_est_pose);
-                disp("Scan in")
+
+                
+
+
+                % Update global 3D map
+%                 pose = obj.current_est_pose;
+%                 cloud_wrt_rel_origin(:, 1:2) = utility_functions.H_trans_2D_new(pose(1:2), ...
+%                                                                       cloud_wrt_rel_origin(:, 1:2), ...
+%                                                                       pose(3));
+
+                obj.global_3D_point_cloud{num_clouds+1} = num2cell(obj.local_cloud);
             end
             
             % Update overviewer informations
@@ -379,12 +411,12 @@ classdef agent
 
         function [pthObj, solnInfo] = compute_roadmap(obj)
             % Take the readings
-            [scans, poses] = scansAndPoses(obj.slam_builder);
-            
+%             [scans, poses] = scansAndPoses(obj.slam_builder);
+%             occMap = buildMap(scans, obj.poses_history, 10, obj.max_lidar_map_range);
+            occMap = obj.global_occupancy;
             % Build occupancy map
-            occMap = buildMap(scans, obj.poses_history, 10, obj.max_lidar_map_range);
-            inflate(occMap, 0.2);
-            occMap.FreeThreshold = 0.50;
+            inflate(occMap, 0.6);
+            occMap.FreeThreshold = 0.48;
             
             % Generate search space and node validator
             now_pose = obj.current_est_pose;
@@ -429,7 +461,6 @@ classdef agent
             
             rng(100, 'twister')
             [pthObj, solnInfo] = plan(planner, start_state, next_state);
-
             
             figure;
             show(occMap);
@@ -447,9 +478,9 @@ classdef agent
             controller = controllerPurePursuit;
             controller.Waypoints = path.States(:, 1:2);
 
-            controller.DesiredLinearVelocity = 0.5;
+            controller.DesiredLinearVelocity = 0.8;
             controller.MaxAngularVelocity = 10;
-            % controller.LookaheadDistance = 0.3;
+            controller.LookaheadDistance = 0.1;
 
             current_pose = obj.current_est_pose; % path.States(1, :);
             goal_pose = path.States(end, :);
@@ -467,7 +498,7 @@ classdef agent
                 obj = obj.set_velocity([new_v 0 0], [0, 0, new_a]);
                 start_time = datetime('now');
 
-                pause(0.5)
+                pause(0.1)
 
                 current_pose = obj.get_current_pose("XYR");
                 if ~isempty(obj.overviewer)
@@ -498,13 +529,13 @@ classdef agent
                                                             [0, elapsed_time]);
                         obj.current_est_pose = est_pose;
                     end
+                else
+                    obj.current_est_pose = current_pose;
                 end
 
-                % obj.current_est_pose = current_pose;
                 dist = utility_functions.euclidean_2D(obj.current_est_pose, ...
                                                       goal_pose);
 
-                % initial_pose = new_pose;
                 disp([current_pose, "Dist: ", dist])
             end
             obj = obj.set_current_est_pose(current_pose);
@@ -515,23 +546,21 @@ classdef agent
             if ~exist("mov_th", "var"); mov_th = obj.lidar_range; end
 
             k = 1;
-            while k < iterations
+            while k <= iterations
                 obj = obj.compute_map(mov_th);
                 [path, roadmap] = obj.compute_roadmap();
                 disp("Executing maneuvers")
                 obj = obj.execute_maneuvers(path);
                 k = k+1;
             end
-            obj = obj.set_velocity([0 0 0]);  % Stop agent after slamming
+            obj = obj.set_velocity();  % Stop agent after slamming
             obj.show_map();
         end
 
         function [] = show_map(obj)
             figure;
             title("Occupancy Map");
-            [scans, poses] = scansAndPoses(obj.slam_builder);
-            occMap = buildMap(scans, obj.poses_history, 10, obj.max_lidar_map_range);
-            show(occMap);
+            show(obj.global_occupancy);
             
             my_cloud_ag = pointCloud(cell2mat(obj.global_3D_point_cloud{1, end}));
             player = pcplayer(my_cloud_ag.XLimits, my_cloud_ag.YLimits, my_cloud_ag.ZLimits);

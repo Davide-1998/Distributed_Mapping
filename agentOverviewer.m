@@ -96,19 +96,19 @@ classdef agentOverviewer
             end
         end
 
-        function [scans, poses, cmap] = get_data(obj, agent_id)
+        function [cloud3D, scansData] = get_data(obj, agent_id)
             if ~isKey(obj.registered_agents, agent_id)
                 disp(["Agent ", agent_id, " is not registered"]);
             end
    
             selected_agent = obj.registered_agents(agent_id);
-            if selected_agent.no_scans == false
-                [scans, poses] = scansAndPoses(selected_agent.slam_builder);
-                cmap = selected_agent.map_cloud;
+            if ~isempty(selected_agent.local_cloud)
+                cloud3D = selected_agent.local_cloud;
+                scansData.scans = selected_agent.local_scans;
+                scansData.poses = selected_agent.poses_history;
             else
-                cmap = [];
-                scans = [];
-                poses = [];
+                cloud3D = [];
+                scansData = [];
             end
         end
 
