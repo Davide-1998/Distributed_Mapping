@@ -12,11 +12,13 @@ classdef KF
     end
 
     methods
-        function obj = KF(R, Q, X, A, P, H, B)
+        function obj = KF(matrix_size, R, Q, X, A, P, H, B)
             if ~exist('X', 'var')
                 disp("No initial state setted"); 
             else
                 obj.current_state_est = X;
+            end
+            if ~exist('matrix_size', 'var'); error("A size must be given"); 
             end
             if ~exist('A', 'var'); A = eye(3); end
             if ~exist('P', 'var'); P = eye(3); end
@@ -44,10 +46,10 @@ classdef KF
                          + obj.proc_noise_cov;
                 obj.state_covariance = new_sc;
             else
-                obj.current_state_est = inv(obj.ob_matrix) * meas_in;
+                obj.current_state_est = obj.ob_matrix \ meas_in; % inv(ob_matrix)*meas_in Matlab syntax
                 new_state = obj.current_state_est;
                 
-                obj.state_covariance = inv(obj.ob_matrix) * obj.meas_noise_cov * inv(obj.ob_matrix)';
+                obj.state_covariance = obj.ob_matrix \ obj.meas_noise_cov / obj.ob_matrix';
             end
         end
 
