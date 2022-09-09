@@ -22,7 +22,6 @@ classdef agent
         % Motion
         current_est_pose = [0, 0, 0];  % x y rotation
         prev_est_pose = [0, 0, 0];
-        absolute_pose = [0, 0, 0];
         absolute_origin = [0, 0, 0];        
         tracking_EKF;
         poses_history = [];
@@ -317,17 +316,17 @@ classdef agent
                 data_in = [data.Points(:).X; data.Points(:).Y; data.Points(:).Z];
                 
                 num_clouds = size(obj.global_3D_point_cloud, 2);
-                if num_clouds > obj.kf_th
-                    % Correct noise KF
-                    [data_out, updated_kf] = obj.err_KF.train(data_in);
-                    obj.err_KF = updated_kf;
-                    data_out = data_out';
-                    data = (data_in' + data_out)/2;
-                end
+%                 if num_clouds > obj.kf_th
+%                     % Correct noise KF
+%                     disp("Correcting with KF")
+%                     [data_out, updated_kf] = obj.err_KF.train(data_in);
+%                     obj.err_KF = updated_kf;
+%                     data_in = data_out';
+%                 end
 
                 data = data_in';
                 [temp_cloud, ~, pits] = utility_functions.pre_process_cloud3D(data, ...
-                                                                           obj);
+                                                                              obj);
                 pose = obj.current_est_pose;
                 temp_cloud(:, 1:2) = utility_functions.H_trans_2D_new(pose(1:2), ...
                                                                       temp_cloud(:, 1:2), ...
@@ -337,62 +336,6 @@ classdef agent
                 obj.local_cloud = [temp_cloud; nearby_cloud];
 
                 num_clouds = size(obj.global_3D_point_cloud, 2);
-                % Fix wrt other scans
-                %{
-                if num_clouds >= 1
-                    first_cloud = cell2mat(obj.global_3D_point_cloud{1, end});
-                    cloud_wrt_rel_origin = obj.local_cloud;
-                    cloud_wrt_rel_origin(:, 1:2) = cloud_wrt_rel_origin(:, 1:2) - ... 
-                                                   obj.current_est_pose(1:2);
-                    cloud_wrt_rel_origin = [cloud_wrt_rel_origin; first_cloud];
-                    
-                    %{
-                    first_pose = obj.poses_history(1, :);
-                    rot = obj.current_est_pose(3) - first_pose(3);
-
-                    cloud_wrt_rel_origin = obj.local_cloud;
-                    dist = obj.current_est_pose - first_pose;
-                    for k=1:size(obj.local_cloud, 1)
-                        [nx, ny] = utility_functions.H_trans_2D( ...
-                                                        dist(1:2), ...
-                                                        obj.local_cloud(k, 1:2), ...
-                                                        dist(3));
-                        cloud_wrt_rel_origin(k, 1:2) = [nx, ny];
-                    end
-                    
-                    cloud_wrt_rel_origin = [cloud_wrt_rel_origin; first_cloud];
-                    %}
-                    %{
-                    fixed_cloud = pointCloud(first_cloud);
-                    mov_cloud = pointCloud(obj.local_cloud);
-                    fixed_cloud_down = pcdownsample(fixed_cloud, 'gridAverage', 0.1);
-                    mov_cloud_down = pcdownsample(mov_cloud, 'gridAverage', 0.1);
-                    
-                    rot_mat = [cos(rot), -sin(rot), 0; ...
-                               sin(rot), cos(rot), 0; ...
-                               0, 0, 1];
-                    trans = [obj.current_est_pose(1:2), 0];
-
-                    tf = rigid3d(rot_mat, trans);
-                    
-                    tform = pcregistericp(mov_cloud_down, ...
-                                          fixed_cloud_down, ...
-                                          'Metric', ...
-                                          'pointToPlane', ...
-                                          'Extrapolate', true, ...
-                                          'InitialTransform', tf);
-
-                    cloud_align = pctransform(mov_cloud, tform);
-                    cloud_trans = pcmerge(fixed_cloud, cloud_align, 0.03);
-                    cloud_wrt_rel_origin = cloud_trans.Location;
-                    %}
-
-                else
-                    cloud_wrt_rel_origin = obj.local_cloud;
-                    cloud_wrt_rel_origin(:, 1:2) = cloud_wrt_rel_origin(:, 1:2) - ... 
-                                                   obj.current_est_pose(1:2);
-                end
-                %}
                 
                 if num_clouds > 1
                     cloud_wrt_rel_origin = [cell2mat(obj.global_3D_point_cloud{end}); ... 
@@ -408,16 +351,16 @@ classdef agent
                 [ranges, angles] = utility_functions.cartesian_to_polar_2D(full_occupancy);
                 
                 occupancy = [ranges, angles];
-                distance = norm(obj.current_est_pose(1:2));
-                occupancy = occupancy(abs(occupancy(:, 1) - distance) < mov_th, :);
+%                 distance = norm(obj.current_est_pose(1:2));
+%                 occupancy = occupancy(abs(occupancy(:, 1) - distance) < mov_th, :);
 
                 % Add scans
-                tic
                 scan_in = lidarScan(occupancy(:, 1), occupancy(:, 2));
                 addScan(obj.slam_builder, scan_in, obj.current_est_pose);
-                toc
+                disp("Scan in")
             end
             
+            % Update overviewer informations
             if ~isempty(obj.overviewer)
                 obj.overviewer.registered_agents(obj.id) = obj;
             end
@@ -428,7 +371,6 @@ classdef agent
 
             obj.prev_est_pose = obj.current_est_pose;
             obj.current_est_pose = pose;
-            obj.absolute_pose = obj.absolute_origin + pose;
             if ~isempty(obj.overviewer)
                 obj.overviewer.registered_agents(obj.id) = obj;
             end
@@ -440,7 +382,7 @@ classdef agent
             [scans, poses] = scansAndPoses(obj.slam_builder);
             
             % Build occupancy map
-            occMap = buildMap(scans, poses, 10, obj.max_lidar_map_range);
+            occMap = buildMap(scans, obj.poses_history, 10, obj.max_lidar_map_range);
             inflate(occMap, 0.2);
             occMap.FreeThreshold = 0.50;
             
@@ -453,10 +395,14 @@ classdef agent
             high_bound_y = now_pose(2) + obj.slam_builder.MaxLidarRange;
             low_bound_rot = now_pose(3) - (pi/2);
             high_bound_rot = now_pose(3) + (pi/2);
+            
+            disp([ low_bound_x, high_bound_x, ...
+                  low_bound_y, high_bound_y, low_bound_rot, high_bound_rot])
 
             space = stateSpaceSE2([low_bound_x high_bound_x; ...
                                    low_bound_y high_bound_y; ...
                                    low_bound_rot high_bound_rot]);
+
             validator = validatorOccupancyMap(space);
             validator.Map = occMap;
 
@@ -470,8 +416,10 @@ classdef agent
             % Randomly sample next location to look up
             next_state = sampleUniform(space);
             while ~validator.isStateValid(next_state)
+%                 disp(["Sampled next state", next_state])
                 next_state = sampleUniform(space);
             end
+            disp(["Next state", next_state])
 
             % Find path
             start_state = now_pose;
@@ -512,45 +460,48 @@ classdef agent
 
             dist = utility_functions.euclidean_2D(current_pose, goal_pose);
 
-            initial_pose = obj.get_current_pose("XYR");
+            % initial_pose = obj.get_current_pose("XYR");
 
             while dist > goal_th
-                [v_l, v_a] = obj.get_current_vels();
-                [new_v, new_a] = controller(current_pose);
+                [new_v, new_a] = controller(obj.current_est_pose);
                 obj = obj.set_velocity([new_v 0 0], [0, 0, new_a]);
                 start_time = datetime('now');
 
-                if obj.overviewer.is_gps_available(new_pose(1:2))
-                    disp("GPS ON")
-                [new_x, new_y] = utility_functions.H_trans_2D(initial_pose(1:2), ...
-                                                              new_pose(1:2), ...
-                                                              obj.absolute_pose(3));
-                [wr, ws] = obj.get_factory_setup();
+                pause(0.5)
 
-                theta = new_pose(3) - initial_pose(3);
-                current_pose = [new_x, new_y, theta];
-                
-                now_time = datetime('now');
-                elapsed_time = seconds(now_time - start_time);
-                est_pose = obj.tracking_EKF.predict([new_v, new_a], ...
-                                                    [wr, ws], ...
-                                                    [0, elapsed_time]);
-                x_corr = obj.tracking_EKF.correct(current_pose, ...
-                                                  [new_v, new_a], ...
-                                                  [wr, ws], ...
-                                                  [0, elapsed_time]);
+                current_pose = obj.get_current_pose("XYR");
+                if ~isempty(obj.overviewer)
+                    if obj.overviewer.is_gps_available(current_pose(1:2))
+                        disp("GPS ON")
 
-                else
-                    disp("GPS OFF - KF in use");
-                    now_time = datetime('now');
-                    elpsed_time = seconds(now_time - start_time);
-                    est_pose = obj.tracking_EKF.predict([new_v, new_a], ...
-                                                        [wr, ws], ...
-                                                        [0, elapsed_time]);
-                    current_pose = est_pose;
+                        [wr, ws] = obj.get_factory_setup();
+
+                        % disp(["Curr pose", current_pose])
+
+                        now_time = datetime('now');
+                        elapsed_time = seconds(now_time - start_time);
+                        est_pose = obj.tracking_EKF.predict([new_v, new_a], ...
+                                                            [wr, ws], ...
+                                                            [0, elapsed_time]);
+
+                        x_corr = obj.tracking_EKF.correct(current_pose, ...
+                                                          [new_v, new_a], ...
+                                                          [wr, ws], ...
+                                                          [0, elapsed_time]);
+                        obj.current_est_pose = current_pose;
+                    else
+                        disp("GPS OFF - KF in use");
+                        now_time = datetime('now');
+                        elapsed_time = seconds(now_time - start_time);
+                        est_pose = obj.tracking_EKF.predict([new_v, new_a], ...
+                                                            [wr, ws], ...
+                                                            [0, elapsed_time]);
+                        obj.current_est_pose = est_pose;
+                    end
                 end
 
-                dist = utility_functions.euclidean_2D(current_pose, ...
+                % obj.current_est_pose = current_pose;
+                dist = utility_functions.euclidean_2D(obj.current_est_pose, ...
                                                       goal_pose);
 
                 % initial_pose = new_pose;
@@ -559,19 +510,15 @@ classdef agent
             obj = obj.set_current_est_pose(current_pose);
         end
 
-        function [] = do_slam(obj, iterations, correction_angle)
-            if ~exist("iterations", "var")
-                iterations = 100;
-            end
-
-            if ~exist("correction_angle", "var")
-                correction_angle = 0;
-            end
+        function [] = do_slam(obj, iterations, mov_th)
+            if ~exist("iterations", "var"); iterations = 100; end
+            if ~exist("mov_th", "var"); mov_th = obj.lidar_range; end
 
             k = 1;
             while k < iterations
-                obj = obj.compute_map(correction_angle);
+                obj = obj.compute_map(mov_th);
                 [path, roadmap] = obj.compute_roadmap();
+                disp("Executing maneuvers")
                 obj = obj.execute_maneuvers(path);
                 k = k+1;
             end
@@ -583,7 +530,7 @@ classdef agent
             figure;
             title("Occupancy Map");
             [scans, poses] = scansAndPoses(obj.slam_builder);
-            occMap = buildMap(scans, poses, 10, obj.max_lidar_map_range);
+            occMap = buildMap(scans, obj.poses_history, 10, obj.max_lidar_map_range);
             show(occMap);
             
             my_cloud_ag = pointCloud(cell2mat(obj.global_3D_point_cloud{1, end}));

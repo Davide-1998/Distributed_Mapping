@@ -154,8 +154,30 @@ classdef utility_functions
                     pits_count = pits_count +1;
                 end
             end
+
+            pose = agent.current_est_pose;
+            if size(pits, 1) > 0
+                n_pits = [];
+                n_pits(:, 1:2) = utility_functions.H_trans_2D_new(pose(1:2), ...
+                                                                  pits(:, 1:2), ...
+                                                                  pose(3));
+                n_pits(:, 3) = pits(:, 3);
+                pits = n_pits;
+            end
+            if size(ground, 1) > 0
+                n_ground = [];
+                n_ground(:, 1:2) = utility_functions.H_trans_2D_new(pose(1:2), ...
+                                                                    ground.Location(:, 1:2), ...
+                                                                    pose(3));
+                n_ground(:, 3) = ground.Location(:, 3);
+                ground = n_ground;
+            end
+            
             t_cloud = removeInvalidPoints(t_cloud);
             xyz_cloud = t_cloud.Location;
+            xyz_cloud(:, 1:2) = utility_functions.H_trans_2D_new(pose(1:2), ...
+                                                                 xyz_cloud(:, 1:2), ...
+                                                                 pose(3));
         end
 
         function [ranges, angles] = cartesian_to_polar_2D(matrix)
@@ -200,32 +222,17 @@ classdef utility_functions
                     
                     % Last cloud is the most updated representation!
                     if ~isempty(selected_agent.global_3D_point_cloud)
-                        agent_cloud = cell2mat(selected_agent.global_3D_point_cloud{1, end});
+                        agent_cloud = cell2mat(selected_agent.global_3D_point_cloud{end});
                     else
                         disp([selected_agent.id, " has no clouds"])
                         return;
                     end
                     
-                    data = nearby_agents(keys{1, id_ag});
-                    rho = data(1);
-                    angle = data(2);
-                    agent_coord = [rho*cos(angle), rho*sin(angle)];
-                    orient = selected_agent.poses_history(end, 3) - ...
-                             agent.current_relative_pose(3);
-%                     orient = -3.14;
-
-                    % Maybe account for a smart indexing?
-                    local_cloud = [];
-                    for k=1:size(agent_cloud, 1)
-                        agent_points = agent_cloud(k, :);
-                        % agent_points(1:2) = agent_points(1:2);
-                        [nx, ny] = utility_functions.H_trans_2D(agent_coord, ...
-                                                                agent_points(1:2), ...
-                                                                orient);
-                        % local_points = local_points + agent_coord;
-                        local_cloud = [local_cloud; [nx, ny, agent_points(3)]];
-                    end
-                    nearby_cloud = [nearby_cloud; local_cloud];
+%                     data = nearby_agents(keys{1, id_ag});
+%                     rho = data(1);
+%                     angle = data(2);
+                    
+                    nearby_cloud = [nearby_cloud; agent_cloud];
                 end
             else
                 return;

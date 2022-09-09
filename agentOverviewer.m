@@ -7,7 +7,7 @@ classdef agentOverviewer
     methods
         function obj = agentOverviewer()
             obj.registered_agents = containers.Map;
-            obj.map_properties = struct(['no_gps_limits'], [[]]);
+            obj.map_properties = struct('no_gps_limits', []);
         end
         
         function obj = set_no_gps_areas(obj, x_limits, y_limits)
@@ -63,16 +63,16 @@ classdef agentOverviewer
             end
 
             agent_a = obj.registered_agents(id_ag_1);
-            agent_a_pose = agent_a.absolute_pose;
+            agent_a_pose = agent_a.get_current_pose('XYR');
 
             agent_b = obj.registered_agents(id_ag_2);
-            agent_b_pose = agent_b.absolute_pose;
+            agent_b_pose = agent_b.get_current_pose('XYR');
 
             dist = utility_functions.euclidean_2D(agent_a_pose, ...
                                                    agent_b_pose);
             % simulate proximity sensor output
-            agent_b_to_a_x = agent_b_pose(1) - agent_a.current_relative_pose(1);
-            agent_b_to_a_y = agent_b_pose(2) - agent_a.current_relative_pose(2);
+            agent_b_to_a_x = agent_b_pose(1) - agent_a.current_est_pose(1);
+            agent_b_to_a_y = agent_b_pose(2) - agent_a.current_est_pose(2);
             range = dist;
             angle = atan2(agent_b_to_a_y - agent_a_pose(2), ...
                           agent_b_to_a_x - agent_a_pose(1));
