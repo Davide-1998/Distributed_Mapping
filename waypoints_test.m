@@ -19,7 +19,8 @@ obj = obj.ros_connect();
 waypoints = [0, 0;
              5, 0;
              5, 5;
-             0, 5];
+             2, 6;
+             -2, 3];
 
 path.States = waypoints; % - obj.current_relative_pose(1:2);
 
@@ -43,8 +44,8 @@ dist = utility_functions.euclidean_2D(current_pose, goal_pose);
 initial_pose = obj.get_current_pose("XYR"); % Absolute pose
 
 kf = trackingEKF(@tran_function, @measurement_function, current_pose, ...
-                 "MeasurementNoise", 0.0, ...
-                 'ProcessNoise', diag([0.9, 0.9, 0.1]));
+                 "MeasurementNoise", 0.15, ...
+                 'ProcessNoise', 0.5);
 
 true_poses = current_pose(1:2);
 kf_no_gps = [];
@@ -128,13 +129,16 @@ hold on
 plot(waypoints(:, 1), waypoints(:, 2), '^-', 'LineWidth', 2);
 hold on;
 plot(kf_no_gps(:, 1), kf_no_gps(:, 2), "--", "Color", 'r', "LineWidth", 2);
-% hold on
-% no_gps_area = polyshape(gps_lims_points(1:3, 1), gps_lims_points(1:3, 2));
-% plot(no_gps_area, "FaceColor", 'g', "FaceAlpha", 0.1);
-title("Trajectories: Real VS EKF")
+hold on
+x_ngps = [-2, 2, 2, -2];
+y_ngps = [3, 3, 7, 7];
+no_gps_area = polyshape(x_ngps, y_ngps);
+plot(no_gps_area, "FaceColor", 'g', "FaceAlpha", 0.1);
+title("Trajectories: Real VS EKF", 'FontSize', 18)
 hold off;
 legend('Robot trajectory', 'Predicted EKF',  ...
-        'Waypoints', 'EKF no GPS', "Location", 'southoutside');
+        'Waypoints', 'EKF no GPS', "Location", 'southoutside', 'FontSize', 18);
+% saveas(f_1, "Report_images/Trajectory_EKF", "png");
 
 % f_2 = figure;
 % f_2.Position = [0 0 1000 500];

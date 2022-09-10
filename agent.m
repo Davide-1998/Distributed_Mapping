@@ -86,19 +86,6 @@ classdef agent
             obj.expected_input_size = [hz_res*vt_res, 3];
         end
 
-        function obj = initialize_err_KF(obj, meas_cov, proc_cov)
-            if ~exist('meas_cov', 'var'); meas_cov=ones(1, 3); end
-            if ~exist('proc_cov', 'var'); proc_cov=zeros(1, 3); end
-            if size(meas_cov, 2) ~= 3 || size(proc_cov, 2) ~= 3
-                error("Input argument must be 3D");
-            end
-            
-            R = diag(meas_cov);
-            Q = diag(proc_cov);
-
-            obj.err_KF = KF(R, Q);
-        end
-
         function obj = set_lidar_origin_height(obj, h)
             obj.lidar_origin_height = h;
         end
@@ -202,7 +189,17 @@ classdef agent
                                            current_pose, ...
                                            "MeasurementNoise", 0.1, ...
                                            'ProcessNoise', diag([1,1,1]));
-            obj.kf_th = kf_threshold;
+            obj.err_KF = KF2(3, 0.01, 1);
+        end
+
+        function obj = modify_KF_params(R_value, Q_value, input_dim)
+            if ~exist("R_value", "var"); R_value = 1; end
+            if ~exist("Q_value", "var"); Q_value = 1; end
+            if exist("input_dim", "var")
+                obj.err_KF = KF2(input_dim, R_value, Q_value);
+            else
+                obj.err_KF = KF2(3, R_value, Q_value);
+            end
         end
 
         function obj = set_id(obj, new_id)
@@ -257,54 +254,7 @@ classdef agent
             obj.slam_builder.LoopClosureThreshold = 210;  
             obj.slam_builder.LoopClosureSearchRadius = 5;
         end
-        function obj = refine_3D_map(obj)
-            prevTF = [];
-            for k=1:size(obj.global_3D_point_cloud, 1)
-                pcl_wogrd = obj.global_3D_point_cloud(k);
-                % pcl_wogrd = pointCloud(local_cloud);
-                % Data downsampling for speed
-                pcl_wogrd_sampled = pcdownsample(pcl_wogrd, 'random', 0.25);
-
-                % Registering point cloud
-                scanAccepted = 1;
-                count = size(obj.global_3D_point_cloud, 1);
-                if count == 0
-                    tform = [];
-                else
-                    if count == 1
-                        moving = obj.global_3D_point_cloud(count);
-                        tform = pcregisterndt(pcl_wogrd_sampled, moving, 2.5);
-                    else
-                        tform = pcregisterndt(pcl_wogrd_sampled, obj.global_3D_point_cloud(count), 2.5, ...
-                            'InitialTransform', prevTF);
-                    end
-
-                    relPose = [tform2trvec(tform.T') tform2quat(tform.T')];
-                    addRelativePose(obj.poses_graph,relPose);
-                    %{
-                    if sqrt(norm(relPose(1:3))) > distanceMovedThreshold
-                        addRelativePose(pGraph,relPose);
-
-                    else
-                        scanAccepted = 0;
-                    end
-                    %}
-                end
-
-                if scanAccepted == 1
-                    count = count + 1;
-
-                    % obj.map_cloud = [obj.map_cloud; pcl_wogrd_sampled];
-
-                    % pose graph optimization
-                    % if mod(count, 5) == 0 %size(obj.map_cloud, 1) >= 2
-                    obj.poses_graph = optimizePoseGraph(obj.poses_graph);
-                    % nd
-                    prevTF = tform;
-                end
-            end
-        end
-
+        
         function obj = compute_map(obj, mov_th)
             if ~exist('mov_th', 'var')
                 mov_th = 5;
@@ -318,15 +268,11 @@ classdef agent
                 data_in = [data.Points(:).X; data.Points(:).Y; data.Points(:).Z];
                 
                 num_clouds = size(obj.global_3D_point_cloud, 2);
-%                 if num_clouds > obj.kf_th
-%                     % Correct noise KF
-%                     disp("Correcting with KF")
-%                     [data_out, updated_kf] = obj.err_KF.train(data_in);
-%                     obj.err_KF = updated_kf;
-%                     data_in = data_out';
-%                 end
+                
+                % Correct noise KF
+                [data_corr, obj.err_KF] = obj.err_KF.estimate(data_in);
 
-                data = data_in';
+                data = data_corr;
                 [temp_cloud, ~, pits] = utility_functions.pre_process_cloud3D(data, ...
                                                                               obj);
                 obj.local_cloud = temp_cloud;
@@ -336,7 +282,7 @@ classdef agent
                 [ranges, angles] = utility_functions.cartesian_to_polar_2D(full_occupancy);          
                 scan_in = lidarScan(ranges, angles);
                 
-                obj.local_scans{end+1} = scan_in; % New
+                obj.local_scans{end+1} = scan_in;
 
                 addScan(obj.slam_builder, scan_in, obj.current_est_pose);
                 % [scans, poses] = scansAndPoses(obj.slam_builder);
@@ -377,18 +323,6 @@ classdef agent
                                        obj.local_cloud];
                 end
 
-
-                % Add scans
-
-                
-
-
-                % Update global 3D map
-%                 pose = obj.current_est_pose;
-%                 cloud_wrt_rel_origin(:, 1:2) = utility_functions.H_trans_2D_new(pose(1:2), ...
-%                                                                       cloud_wrt_rel_origin(:, 1:2), ...
-%                                                                       pose(3));
-
                 obj.global_3D_point_cloud{num_clouds+1} = num2cell(obj.local_cloud);
             end
             
@@ -410,12 +344,15 @@ classdef agent
         end
 
         function [pthObj, solnInfo] = compute_roadmap(obj)
-            % Take the readings
+            % Take OccupancyMap
 %             [scans, poses] = scansAndPoses(obj.slam_builder);
 %             occMap = buildMap(scans, obj.poses_history, 10, obj.max_lidar_map_range);
             occMap = obj.global_occupancy;
-            % Build occupancy map
-            inflate(occMap, 0.6);
+            
+            viewer = pcplayer([-20, 20], [-20, 20], [-20, 20]);
+            view(viewer, obj.local_cloud);
+
+            inflate(occMap, 0.1);
             occMap.FreeThreshold = 0.48;
             
             % Generate search space and node validator

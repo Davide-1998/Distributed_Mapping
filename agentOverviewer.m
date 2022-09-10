@@ -13,10 +13,11 @@ classdef agentOverviewer
         function obj = set_no_gps_areas(obj, x_limits, y_limits)
             validateattributes(x_limits, {'numeric'}, {'size', [1, 2]});
             validateattributes(y_limits, {'numeric'}, {'size', [1, 2]});
-            limits = [[min(x_limits); max(x_limits)], ...
-                      [min(y_limits); max(y_limits)]];
+
+            limits = [[min(x_limits), max(x_limits)]; ...
+                      [min(y_limits), max(y_limits)]];
             obj.map_properties.no_gps_limits = limits;
-            obj.map_properties.no_gps_limits
+            obj.map_properties.no_gps_limits;
         end
 
         function res = is_gps_available(obj, pos)

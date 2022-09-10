@@ -112,11 +112,13 @@ classdef utility_functions
         end
 
         function [xyz_cloud, ground, pits] = pre_process_cloud3D(LidarData, ...
-                                                                 agent)
+                                                                 agent, ...
+                                                                 rho_th)
+            if ~exist("rho_th", "var"); rho_th = 0.95; end
             xyz_cloud = [];
             pits = [];
             cloud_c = 1;
-            rho_th = 0.95;
+            
             if ~isa(LidarData, 'numeric')
                 for k=1:size(LidarData.Points, 1)
 
