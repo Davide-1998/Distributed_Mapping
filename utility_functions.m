@@ -144,36 +144,24 @@ classdef utility_functions
             end
             t_cloud = pointCloud(xyz_cloud);
             [idxGround, t_cloud, ground] = segmentGroundSMRF(t_cloud, ...
-                                                             "MaxWindowRadius", 5, ...
-                                                             "SlopeThreshold", 0.07, ...
-                                                             "ElevationThreshold", 0.07);
-
-            condition_to_move = 0.5*agent.wheel_radius + agent.lidar_origin_height;
+                                                             "MaxWindowRadius", 8, ...
+                                                             "SlopeThreshold", 0.05, ...
+                                                             "ElevationThreshold", 0.1);
+            ground = ground.Location;
+            condition_to_move = 2*agent.height; %0.5*agent.wheel_radius + agent.lidar_origin_height;
             pits_count = 1;
-            for k=1:size(xyz_cloud)               
-                if ground.Location(k, 3) < -1*condition_to_move
-                    pits(pits_count, :) = ground.Location(k, :);
+            new_ground = [];
+            for k=1:size(ground, 1)               
+                if ground(k, 3) < -1*condition_to_move
+                    pits(pits_count, :) = ground(k, :);
                     pits_count = pits_count +1;
+                else
+                    new_ground = [new_ground; ground(k, :)];
                 end
             end
-
-%             pose = agent.current_est_pose;
-%             if size(pits, 1) > 0
-%                 n_pits = [];
-%                 n_pits(:, 1:2) = utility_functions.H_trans_2D_new(pose(1:2), ...
-%                                                                   pits(:, 1:2), ...
-%                                                                   pose(3));
-%                 n_pits(:, 3) = pits(:, 3);
-%                 pits = n_pits;
-%             end
-%             if size(ground, 1) > 0
-%                 n_ground = [];
-%                 n_ground(:, 1:2) = utility_functions.H_trans_2D_new(pose(1:2), ...
-%                                                                     ground.Location(:, 1:2), ...
-%                                                                     pose(3));
-%                 n_ground(:, 3) = ground.Location(:, 3);
-%                 ground = n_ground;
-%             end
+            if ~isempty(new_ground)
+                ground = new_ground;
+            end
             
             t_cloud = removeInvalidPoints(t_cloud);
             xyz_cloud = t_cloud.Location;
