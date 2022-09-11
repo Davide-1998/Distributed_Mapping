@@ -1,6 +1,7 @@
 % KF2
 % Translation
 % A -> state_tr -> default to I
+% P -> state_cov
 % B -> input_matrix -> default to 0
 % H -> ob_matrix -> default to I
 % R -> ob_cov -> Necessary

@@ -399,12 +399,14 @@ classdef agent
             rng(100, 'twister')
             [pthObj, solnInfo] = plan(planner, start_state, next_state);
             
-            figure;
+            f_rm = figure;
+            f_rm.Position = [0, 0, 1000, 1000];
             show(occMap);
             hold on;
             plot(solnInfo.TreeData(:,1),solnInfo.TreeData(:,2), '.-');
             hold on;
             plot(pthObj.States(:, 1), pthObj.States(:, 2), '.-');
+            saveas(f_rm, "Report_images/Roadmap", "png")
             
         end
         function obj = execute_maneuvers(obj, path)
