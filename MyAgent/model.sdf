@@ -205,7 +205,7 @@
 		<ray>
           <scan>
             <horizontal>
-              <samples>1800</samples>
+              <samples>360</samples> <!-- 1800 Before -->
               <resolution>1</resolution>
               <min_angle>-3.141592</min_angle>
               <max_angle>3.141592</max_angle>
@@ -228,7 +228,7 @@
             <stddev>0.01</stddev>
           </noise>
         </ray>
-        <!-- Plugin controlling laser data stream
+        <!-- 2D Plugin controlling laser data stream
 		<plugin name="Imported_plugin" filename="libgazebo_ros_laser.so">
             <topicName> My_Agent/ScanResults </topicName>
             <frameName> lidar </frameName>
@@ -262,8 +262,7 @@
             <!-- <odometryFrame> world </odometryFrame> -->
         <broadcastTF> true </broadcastTF>
         <odometryTopic> /My_Agent/odometry </odometryTopic>
-        </plugin>
-        
+    </plugin>       
 
     <!--
 	<plugin name="Control_Plugin" filename="libgazebo_ros_diff_drive.so">
