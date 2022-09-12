@@ -148,7 +148,7 @@ classdef utility_functions
                                                              "SlopeThreshold", 0.05, ...
                                                              "ElevationThreshold", 0.1);
             ground = ground.Location;
-            condition_to_move = 2*agent.height; %0.5*agent.wheel_radius + agent.lidar_origin_height;
+            condition_to_move = 2*agent.height;
             pits_count = 1;
             new_ground = [];
             for k=1:size(ground, 1)               
@@ -165,9 +165,6 @@ classdef utility_functions
             
             t_cloud = removeInvalidPoints(t_cloud);
             xyz_cloud = t_cloud.Location;
-%             xyz_cloud(:, 1:2) = utility_functions.H_trans_2D_new(pose(1:2), ...
-%                                                                  xyz_cloud(:, 1:2), ...
-%                                                                  pose(3));
         end
 
         function [ranges, angles] = cartesian_to_polar_2D(matrix)
@@ -216,19 +213,8 @@ classdef utility_functions
                         disp([selected_agent.id, " has no clouds"])
                         return;
                     end
-%                     data = nearby_agents(keys{1, id_ag});
-%                     rho = data(1);
-%                     angle = data(2);
-%                     dx = rho*cos(angle);
-%                     dy = rho*sin(angle);
-%                     rot = selected_agent.current_est_pose(3) - agent.current_est_pose(3);
-
-%                     agent_cloud(:, 1:2) = utility_functions.H_trans_2D_new([dx, dy], ...
-%                                                     agent_cloud(:, 1:2), rot);
                     
                     data.nearby_cloud = [data.nearby_cloud; agent_cloud];
-                    % if isempty(data.nearby_occupancies)
-                    % data.nearby_occupancies = agent_occupancy;
                     data.scans = scansData.scans;
                     data.poses = scansData.poses;
                 end
@@ -257,8 +243,8 @@ classdef utility_functions
                         return;
                     end
                     
-                    agent_ranges = []; % zeros(numel(scan_data)*scan_data{1, 1}.Count, 1);
-                    agent_angles = []; % zeros(numel(scan_data)*scan_data{1, 1}.Count, 1);
+                    agent_ranges = [];
+                    agent_angles = [];
                     
                     for k=1:numel(scan_data)
                         agent_ranges = [agent_ranges; scan_data{1, k}.Ranges];
@@ -279,15 +265,15 @@ classdef utility_functions
                     x_local = range*cos(incl);
                     y_local = range*sin(incl);
 
-                    new_ranges = []; % zeros(1, numel(agent_ranges)) + inf;
-                    new_angles = []; % zeros(1, numel(agent_ranges));
+                    new_ranges = [];
+                    new_angles = [];
                     
                     for pos = 1:size(scan_poses, 1)
                         agent_theta = scan_poses(pos, 3);
                         for k=1:numel(agent_ranges)
                             if ~isinf(agent_ranges(k))
                             
-                                theta = agent_angles(k); %- scan_poses(pos, 3); % remove rotation
+                                theta = agent_angles(k);
                                 x_range = agent_ranges(k)*cos(theta);
                                 y_range = agent_ranges(k)*sin(theta);
                                 

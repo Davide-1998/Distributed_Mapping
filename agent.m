@@ -146,8 +146,7 @@ classdef agent
         end
         function obj = agent(id_, scan_range, current_pose, ...
                              absolute_o, comm_range, ...
-                             max_lidar_map_range_, lidar_orig_h, est_acc, ...
-                             kf_threshold)
+                             max_lidar_map_range_, lidar_orig_h, est_acc)
             if ~exist("id_", 'var')
                 id_ = "Default_id";
             end
@@ -171,9 +170,6 @@ classdef agent
             end
             if ~exist("max_lidar_map_range_", 'var')
                 max_lidar_map_range_ = scan_range;
-            end
-            if ~exist("kf_threshold", 'var')
-                kf_threshold = 10;
             end
 
             obj.id = id_;
@@ -228,11 +224,7 @@ classdef agent
             msg.Angular.Y = vel_angular(2);
             msg.Angular.Z = vel_angular(3);
 
-            % obj.current_linear_vel = vel_linear(1);
-            % obj.current_angular_vel = vel_angular(3);
-
             send(obj.vel_command, msg);
-            % obj.last_set_vel_t = now;
         end
         function obj = ros_connect(obj, agent_id)
             if ~exist('agent_id', 'var')
@@ -255,10 +247,7 @@ classdef agent
             obj.slam_builder.LoopClosureSearchRadius = 5;
         end
         
-        function obj = compute_map(obj, mov_th)
-            if ~exist('mov_th', 'var')
-                mov_th = 5;
-            end
+        function obj = compute_map(obj)
             if obj.ros_conn == false
                 disp("Not connected to ROS");
                 return;
@@ -266,8 +255,6 @@ classdef agent
                 data = receive(obj.scanned_data_sub, 3);
                 
                 data_in = [data.Points(:).X; data.Points(:).Y; data.Points(:).Z];
-                
-                num_clouds = size(obj.global_3D_point_cloud, 2);
                 
                 % Correct noise KF
                 [data_corr, obj.err_KF] = obj.err_KF.estimate(data_in);
@@ -279,15 +266,14 @@ classdef agent
 
                 % Make occupancy map
                 full_occupancy = [temp_cloud; pits];
+                
                 [ranges, angles] = utility_functions.cartesian_to_polar_2D(full_occupancy);          
                 scan_in = lidarScan(ranges, angles);
-                
-                obj.local_scans{end+1} = scan_in;
 
-                addScan(obj.slam_builder, scan_in, obj.current_est_pose);
-                % [scans, poses] = scansAndPoses(obj.slam_builder);
+                obj.local_scans{end+1} = scan_in;
                 
-                occMap = buildMap(obj.local_scans, obj.poses_history, 10, obj.max_lidar_map_range);
+                occMap = buildMap(obj.local_scans, obj.poses_history, 10, ...
+                                  obj.max_lidar_map_range);
 
                 obj.global_occupancy = occMap;
                 
@@ -312,8 +298,8 @@ classdef agent
                     end
                     poses = [poses; poses_n];
 
-                    obj.global_occupancy = buildMap(scans, poses, 10, obj.max_lidar_map_range);
-                    
+                    obj.global_occupancy = buildMap(scans, poses, 10, ...
+                                                    obj.max_lidar_map_range);
                 end
 
                 num_clouds = size(obj.global_3D_point_cloud, 2);
@@ -343,30 +329,39 @@ classdef agent
             obj.poses_history = [obj.poses_history; pose];
         end
 
-        function [pthObj, solnInfo] = compute_roadmap(obj)
-            % Take OccupancyMap
-%             [scans, poses] = scansAndPoses(obj.slam_builder);
-%             occMap = buildMap(scans, obj.poses_history, 10, obj.max_lidar_map_range);
-            occMap = obj.global_occupancy;
-            
-            viewer = pcplayer([-20, 20], [-20, 20], [-20, 20]);
-            view(viewer, obj.local_cloud);
+        function [pthObj, solnInfo] = compute_roadmap(obj, free_th)
+            if ~exist("free_th", "var"); free_th=0.5; end
 
+            % Take OccupancyMap
+            occMap = obj.global_occupancy;
             inflate(occMap, 0.1);
-            occMap.FreeThreshold = 0.48;
-            
+            occMap.FreeThreshold = free_th;
+
             % Generate search space and node validator
             now_pose = obj.current_est_pose;
-            
-            low_bound_x = now_pose(1); % - obj.slam_builder.MaxLidarRange;
-            high_bound_x = now_pose(1) + obj.slam_builder.MaxLidarRange;
-            low_bound_y = now_pose(2); % - obj.slam_builder.MaxLidarRange;
-            high_bound_y = now_pose(2) + obj.slam_builder.MaxLidarRange;
-            low_bound_rot = now_pose(3) - (pi/2);
-            high_bound_rot = now_pose(3) + (pi/2);
-            
-            disp([ low_bound_x, high_bound_x, ...
-                  low_bound_y, high_bound_y, low_bound_rot, high_bound_rot])
+            alpha = pi/2;
+            range = (obj.lidar_range/2);
+
+            angle_right = now_pose(3)-(alpha/2);
+            angle_left = now_pose(3)+(alpha/2);
+            points = [now_pose(1), now_pose(2);
+                now_pose(1)+(range*cos(angle_right)), now_pose(2)+(range*sin(angle_right));
+                now_pose(1)+(range*cos(angle_left)), now_pose(2)+(range*sin(angle_left))];
+            low = min(points);
+            high = max(points);
+            low_bound_x = low(1);
+            low_bound_y = low(2);
+            high_bound_x = high(1);
+            high_bound_y = high(2);
+
+            low_bound_rot = min([now_pose(3) - 0.1*now_pose(3), ...
+                                 now_pose(3) + 0.1*now_pose(3)]);
+            high_bound_rot = max([now_pose(3) - 0.1*now_pose(3), ...
+                                  now_pose(3) + 0.1*now_pose(3)]);
+
+            disp([low_bound_x, high_bound_x, ...
+                  low_bound_y, high_bound_y, ...
+                  low_bound_rot, high_bound_rot])
 
             space = stateSpaceSE2([low_bound_x high_bound_x; ...
                                    low_bound_y high_bound_y; ...
@@ -377,51 +372,56 @@ classdef agent
 
             % set up planner
             planner = plannerRRTStar(space, validator);
-            planner.BallRadiusConstant = 0.5; % same?
-            planner.MaxNumTreeNodes = 50;  % Make it adaptive?
-            planner.MaxConnectionDistance = 1; % same?
+            planner.BallRadiusConstant = 0.5;
+            planner.MaxNumTreeNodes = 500;
+            planner.MaxConnectionDistance = 0.5;
             planner.ContinueAfterGoalReached = true;
 
             % Randomly sample next location to look up
             next_state = sampleUniform(space);
             while ~validator.isStateValid(next_state)
-%                 disp(["Sampled next state", next_state])
                 next_state = sampleUniform(space);
             end
-            disp(["Next state", next_state])
 
             % Find path
             start_state = now_pose;
             while ~validator.isStateValid(start_state)
                 start_state = sampleGaussian(space, start_state, [1 1 1], 1);
             end
-            
+
             rng(100, 'twister')
             [pthObj, solnInfo] = plan(planner, start_state, next_state);
-            
+
             f_rm = figure;
-            f_rm.Position = [0, 0, 1000, 1000];
+            f_rm.Position = [0, 0, 400, 400];
             show(occMap);
             hold on;
             plot(solnInfo.TreeData(:,1),solnInfo.TreeData(:,2), '.-');
             hold on;
             plot(pthObj.States(:, 1), pthObj.States(:, 2), '.-');
-            saveas(f_rm, "Report_images/Roadmap", "png")
-            
+            % saveas(f_rm, "Report_images/Roadmap", "png")
+
         end
         function obj = execute_maneuvers(obj, path)
             % A path input is made of X Y and Rotation
             if numel(path.States) == 0
-                return;
+                free_th = 0.5;
+                while path.States == 0
+                    [path, info] = obj.compute_roadmap(free_th);
+                    free_th = free_th + 0.05;
+                end
+                return
             end
+            disp(path.States)
+
             controller = controllerPurePursuit;
             controller.Waypoints = path.States(:, 1:2);
 
-            controller.DesiredLinearVelocity = 0.8;
+            controller.DesiredLinearVelocity = 0.5;
             controller.MaxAngularVelocity = 10;
             controller.LookaheadDistance = 0.1;
 
-            current_pose = obj.current_est_pose; % path.States(1, :);
+            current_pose = obj.current_est_pose;
             goal_pose = path.States(end, :);
             disp(["State start: ", current_pose])
             disp(["State end: ", goal_pose])
@@ -430,14 +430,10 @@ classdef agent
 
             dist = utility_functions.euclidean_2D(current_pose, goal_pose);
 
-            % initial_pose = obj.get_current_pose("XYR");
-
             while dist > goal_th
-                [new_v, new_a] = controller(obj.current_est_pose);
-                obj = obj.set_velocity([new_v 0 0], [0, 0, new_a]);
+                [new_l, new_a] = controller(obj.current_est_pose);
+                obj = obj.set_velocity([new_l 0 0], [0, 0, new_a]);
                 start_time = datetime('now');
-
-                pause(0.1)
 
                 current_pose = obj.get_current_pose("XYR");
                 if ~isempty(obj.overviewer)
@@ -446,16 +442,14 @@ classdef agent
 
                         [wr, ws] = obj.get_factory_setup();
 
-                        % disp(["Curr pose", current_pose])
-
                         now_time = datetime('now');
                         elapsed_time = seconds(now_time - start_time);
-                        est_pose = obj.tracking_EKF.predict([new_v, new_a], ...
+                        est_pose = obj.tracking_EKF.predict([new_l, new_a], ...
                                                             [wr, ws], ...
                                                             [0, elapsed_time]);
 
                         x_corr = obj.tracking_EKF.correct(current_pose, ...
-                                                          [new_v, new_a], ...
+                                                          [new_l, new_a], ...
                                                           [wr, ws], ...
                                                           [0, elapsed_time]);
                         obj.current_est_pose = current_pose;
@@ -463,7 +457,7 @@ classdef agent
                         disp("GPS OFF - KF in use");
                         now_time = datetime('now');
                         elapsed_time = seconds(now_time - start_time);
-                        est_pose = obj.tracking_EKF.predict([new_v, new_a], ...
+                        est_pose = obj.tracking_EKF.predict([new_l, new_a], ...
                                                             [wr, ws], ...
                                                             [0, elapsed_time]);
                         obj.current_est_pose = est_pose;
@@ -480,19 +474,18 @@ classdef agent
             obj = obj.set_current_est_pose(current_pose);
         end
 
-        function [] = do_slam(obj, iterations, mov_th)
-            if ~exist("iterations", "var"); iterations = 100; end
-            if ~exist("mov_th", "var"); mov_th = obj.lidar_range; end
+        function [] = do_slam(obj, iterations)
+            if ~exist("iterations", "var"); iterations = 10; end
 
             k = 1;
             while k <= iterations
-                obj = obj.compute_map(mov_th);
+                obj = obj.compute_map();
                 [path, roadmap] = obj.compute_roadmap();
                 disp("Executing maneuvers")
                 obj = obj.execute_maneuvers(path);
                 k = k+1;
             end
-            obj = obj.set_velocity();  % Stop agent after slamming
+            obj = obj.set_velocity();  % Stop agent after SLAM
             obj.show_map();
         end
 
