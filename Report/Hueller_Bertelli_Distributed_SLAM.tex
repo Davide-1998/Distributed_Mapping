@@ -43,12 +43,12 @@
     \small --- This report presents the results,
     solutions and implementation of a distributed SLAM system
     on a natural environment. The data were acquired through
-    terrestrial agents and processed onboard. The agent were
+    terrestrial agents and processed onboard. The agents were
     allowed to communicate within a certain range. Each agent
     had at its disposal a Kalmann Filter for data denoising
     and an Extendend Kalmann Filter for position estimation.
     The results shows a good accuracy in reconstructing the
-    environment both in a 3D cloud and as an occupancy map.
+    environment both in a 3D point cloud and as an occupancy map.
     The estimation of the location resulted unsatisfactory.
     }
 
@@ -60,8 +60,8 @@ allows to the agent to map unknown environments and update its knowledge
 of the surroundings. The map resulting will then be used for further steps
 in the autonomous navigation like path planning.
 Agents exploiting the SLAM algorithm have been vastly employed in several
-working realities which space from the industrial wherehouse menagement
-up to civil indoor and outdoor agricultural solutions.
+working realities which space from the industrial 
+up to civil solutions.
 The Distributed SLAM is a variation of the SLAM method, in which multiple
 agents contribute in mapping chunks of the same area to have a faster and
 more precise result than the single agent case. This method aims at
@@ -79,10 +79,10 @@ by posing them into an unrecoverable location. The agents employed are
 assumed to be terrestrial and that their initial locations are known a
 priori. The objective is to explore as long as possible the surroundings
 in order to map them. The output of this process will then be a 3D cloud of
-points representing the mapped environment and the occupancy map representing
+points representing the mapped environment and a 2D occupancy map representing
 the elements detected, their locations and encumbrance.
 Lastly the environment it is supposed to have areas in which the GPS signal
-cannot be transmitted.
+cannot be received.
 
 \section{Adopted Models}
 \subsection{Communication System}
@@ -98,18 +98,18 @@ poses.
 
 \subsection{System Model}
 The robot used in the development of the solution and during the simulations
-is a terrestrial one. It has been modellized just for simulation purposes
-and so its shape is simple event though it has the same dimensions of
+is a terrestrial one. It has been modelled just for simulation purposes
+and so its shape is simple even though it has the same dimensions of
 a common RC car, as shown in Figure \ref{fig:Robot_dimensions}.
-The sensors onboard of the agent are supposed to be, a 3D lidar, an
+The sensors onboard of the agent are supposed to be, a 3D Lidar, an
 accelerometer and a gyroscope. Thanks to these sensors it will be possible
-to map the environment around and know the tangential and radial velocities
+to map the environment around and know the linear and angular velocities
 of the agent toghether with the rotation on its axis.
 For clarity, the robot has been simulated moving over the XY plane while
 rotating around the Z axis.
 The Lidar sensor in use aims at simulating the characteristics of the 
 \href{https://www.robosense.ai/en/rslidar/RS-LiDAR-16}{RS-LIDAR-16} sensor,
-but due to computation demands during simulations its horizontal resolution
+but due to computational demands during simulations its horizontal resolution
 has been reduced to allow reasonable computation times.
 The simulated Lidar sensor has the beam origin in the center of the upper part
 of the agent at an height of 0.135[m] and has the following features:
@@ -129,18 +129,15 @@ of the agent at an height of 0.135[m] and has the following features:
     \hline
 \end{tabular}
 \end{center}
-
-\vspace{0.5cm}
-
+\vspace{0.3cm}
 \begin{figure}[h]
     \centering
     \includegraphics[width=8.5cm]{"../Report_images/Agent_schema"}
     \caption{Schema of the simulated agent.}
     \label{fig:Robot_dimensions}
 \end{figure}
-
 The actuators onboard of the device are supposed to be four electrical motors
-posed nearby each wheel and provide traction both in the frontal and rear
+posed nearby each wheel and providing traction both in the frontal and rear
 axles. Furthermore, only the front wheels are supposed to rotate over
 the Z axis to turn the agent in the desired direction.
 
@@ -182,12 +179,12 @@ were:
 \end{itemize}
 \subsection{Motion Model}
 Regarding the motion model, due to the simplicity of the shape and the inputs
-at our disposal, we decided to employ the Differential Dive kinematic model
-which represented our robot as a two-wheeled one with an rotation theta with 
+at our disposal, we decided to employ the Differential Drive kinematic model
+which represented our robot as a two-wheeled one rotated of a quantity theta with 
 respect to the X axis and revolving around the Z one as shown in Figure
 \ref{fig:Motion_model}. Furthermore, it allowed
-to control our agents motion by providing the desired tangential
-and radial velocities other than specifying the wheels radius and axle
+to control our agents motion by providing the desired linear
+and angular velocities other than specifying the wheels radius and axle
 separation.
 \begin{figure}[h]
     \centering
@@ -209,7 +206,7 @@ Specifically, the equations ruling the Kalmann Filter in use are the following.
     P = APA^{-1} + Q
 \end{equation}
 \begin{equation}
-    K = PH{HPH^{T} + R}^{-1}
+    K = PH^{T}(HPH^{T} + R)^{-1}
 \end{equation}
 \begin{equation}
     \hat{x} = \hat{x} + K(Z - H\hat{x})  
@@ -233,7 +230,7 @@ a free space area. Furthermore, we also supposed that the GPS location could
 incurr into some errors and so we decided to allow the agent to approximate
 its location to the nearest free one through gaussian sampling in case the 
 initial location would result into an occupied or invalid one. Once the
-initial and arrival locations are in a free space area the agent will then
+initial and arrival locations are in a free space area, the agent will then
 generate the roadmap necessary to reach the arrival position. The algorithm 
 chosen to carry out this task is the RTT*. The choice of this algorithm has
 been lead due to its ability to find paths even through narrow apertures
@@ -243,20 +240,20 @@ itself until it reaches its goal. This latter behaviour has been decisive in
 the choice, especially against the common PRM which will randomly sample all
 the environment generating a bunch of useless data. Lastly, to ensure a
 certain fluidity in the agent motion we constrained the sample of the
-next location using spatial boundaries like the ranges of arriaval rotation,
+next location using spatial boundaries like the ranges of arriaval rotation and
 the minimum and maximum x-y values.
 
 \subsection{Agent Position Estimation}
-Regarding the position of the agents in use we are using their absolute
+Regarding the position of the agents in use we are exploiting their absolute
 location in the space and we keep it updated thanks to the data retrieved
 by the GPS onboard. Unfortunately in natural environment it is not always
-possible to rely on these measurement, so we needed also a way in which to
+possible to rely on these measurements, so we needed also a way to
 estimate the location of the robots relying only on the measurements retrieved
 and the motion model of the robot itself. To achieve this task we decided
 to employ an Extended Kalmann Filter which is specific for non-linear models.
-Its strength is due to the linearizations through derivation of the non-linear
+Its strength is due to the linearization through derivation of the non-linear
 functions ruling the measurements acquisition and the states transition.
-The equations ruling its behaviour are the same of the linear Kalmann Filter,
+The equations describing its behaviour are the same of the linear Kalmann Filter,
 with the only difference that the covariance of the state and the observation
 are computed deriving the respective functions.
 
@@ -266,8 +263,10 @@ agents will move cannot be homogeneous and so the presence of pits or holes
 must be taken into account.
 For this reason in the processing of the 3D point cloud coming from the Lidar
 we appended some lines of code which will perform an automatic detection
-of the points representing the ground through the SMRF algorithm and
-then will further classify these points in pits and non-pits depending by
+of the points representing the ground and then a further classification of
+these points into the pits ones. The ground detection has been carried out 
+through the SMRF algorithm, while the points representing the pits have
+been classified depending by
 their Z distance from the origin of the Lidar beams. Doing so we can ensure
 that the agents will avoid such detected pits by embedding their points into
 the occupancy map generated by the original point cloud, tricking the robots
@@ -278,9 +277,9 @@ Being our system distributed over a moltitude of agents it is also necessary
 to establish some procedure of communication. In particular we have assumed
 that two arbitrary agents can share informations if they are within a certin
 communication range. To simulate this behaviour we supposed that the agents
-has onboard some kind of sensor which act as a proximity one telling at
+have onboard some kind of sensor which act as a proximity one telling at
 which distance and orientation there is an agent. These informations have
-been practically provided to the agents through a third kind of agent
+been practically provided to the robots through a third kind of agent
 which is omniscent regarding the global positioning of the other agents
 and that can access their inner class data. It is important to point out
 that this is a mere program and not a simulated sensor itself.
@@ -291,8 +290,8 @@ between the existing agents.
 In this section of the report will be presented how the system has been
 simulated and implemented, together with its architecture.
 \subsection{Software In Use}
-For the development of our solution we used local machine running Matlab R2021b
-for creating and running
+For the development of our solution we used a local machine running Matlab
+R2021b for creating and executing
 the scripts ruling the agents, performing the data processing and allowing the 
 connection to the simulation environment. This latter one is 
 generated by the simulation software Gazebo v11.11 which provided the
@@ -313,17 +312,18 @@ The software architecture is summarized and proposed in Figure \ref{fig:S_Arch}.
 As Shown in Figure \ref{fig:S_Arch} matlab rules over two classes of objects:
 the agents and the agentOverviewer. The agent class is the one responsible 
 for the data acquisition and processing, roadmap generation, path planning and
-maneuver execution. This class communicate through matlab using the ROS
-framework to retrieve sensible data from the simulation in gazebo, this data
-are the simulated 3D Lidar output and the odometry.
+maneuver execution. It communicates with the simulated environment through
+Matlab using the ROS
+framework to retrieve sensible data from gazebo. The data of interest
+are the simulated 3D Lidar output and the odometry of the agent.
 The other class ruled by the Matlab environment is the agentOverviewer which
 accesses all the properties of the agents existing and exploits their
 knowledge and methods to share data with all the other agents which 
 satisfies the communication criterion. It is important to notice how this
-class do not interfaces directly to the simulation through matlab, but
+class do not interfaces directly to the simulation through Matlab, but
 delegates the agents into taking the data it needs from the simulated
 environment. This behaviour is used to simulate a digital proximity sensor
-which is onboard of each agent. Lastly, this class also embeds the informations
+supposed onboard of each agent. Lastly, this class also embeds the informations
 regarding which areas of the global map do not allow for GPS data retrival
 and forces the agents to estimate their locations.
 
@@ -332,7 +332,7 @@ In this section of the report will be shown the results achieved by our
 solution. For sake of clarity we will present results regarding the different
 steps of the workflow executed by each agent and lastly the global results.
 We will also put focus on the issues tackled in Section \ref{sec:Solution}.
-Specifically we will start discussing about the 3D Lidar data denoising, then
+Specifically, we will start discussing about the 3D Lidar data denoising, then
 about the pits detection, later on the sharing data among the agents,
 thereafter about the roadmap generation and lastly about the estimation
 of the agent location in areas without GPS.
@@ -352,20 +352,20 @@ observation covariance matrix in the Kalmann Filter it
 is possible to achieve a 
 smoother behaviour of the estimates, but after several trials we decided
 that its current value, 0.3, was granting us an acceptable error, as shown
-in the second figure. The error function used to estimate the goodness
+in the second figure. The error function used to determine the goodness
 of the estimation is the following:
 \begin{equation}
     error = ||\hat{x} - x||
 \end{equation}
 in which $\hat{x}$ is the current estimate and $x$ is the true value.
-\vspace{0.5cm}
+% \vspace{0.3cm}
 \begin{figure}[h]
     \centering
     \includegraphics[width=8.5cm]{"../Report_images/Denoising_KF_sine"}
     \caption{Linear Kalmann Filter test over a sine wave.}
     \label{fig:KF_sine}
 \end{figure}
-\vspace{0.5cm}
+% \vspace{0.3cm}
 \begin{figure}[h]
     \centering
     \includegraphics[width=8.5cm]{"../Report_images/Denoising_KF_sine_error"}
@@ -373,6 +373,8 @@ in which $\hat{x}$ is the current estimate and $x$ is the true value.
              the mean.}
     \label{fig:KF_sine_err}
 \end{figure}
+
+\vspace{0.5cm}
 Once we were satisfied of these results we applied the Kalmann Filter to the
 data coming from the Lidar. In order to achieve satisfactory results we had
 to tune up again the observation covariance and process noise matrix, 
@@ -381,7 +383,7 @@ Lidar data having gaussian noise with 0 mean and variance of 0.01 and 0.1, which
 resulting point clouds are shown in Figures \ref{fig:KF_cloud_01} and
 \ref{fig:KF_cloud_1}. The original noisy cloud matrix has been omitted for the
 clarity of the results.
-\vspace{0.5cm}
+% \vspace{0.5cm}
 \begin{figure}[h!]
     \centering
     \includegraphics[width=8.5cm]{"../Report_images/Cloud_01_estimation_KF.png"}
@@ -420,7 +422,7 @@ The error plots for both cases are shown in Figures \ref{fig:KF_err_01} and
 \end{equation}
 Indeed we can observe that in the first figure the error rises but then 
 saturates, while in the second figure its behaviour results quite jittery.
-\newpage
+\vfill
 %\vspace{0.5cm}
 \begin{figure}[h!]
     \centering
@@ -468,7 +470,7 @@ The sharing of data among the agents has been carried out by querying the
 agentOverviewer class for stating the agents nearby and providing the
 data of those agents within the communication range to the asking agent.
 The only issue in this process is the merging and alignment of the data
-contained in the occupancy maps of the two agents into one map. Thanks to
+contained in the occupancy maps of the two agents. Thanks to
 the usage of the absolute coordinates of each agent in simulation and to
 the role of the agentOverviewer in providing also this information, the
 resulting merged map is immediately done. Following are the results before
@@ -508,7 +510,7 @@ the resulting merged cloud point.
 
 \subsection{Roadmap Generation}
 As stated in Section \ref{sec:Solution} the roadmap computation is
-performed by randomly sampling the next location in which to perform the
+carried out by randomly sampling the next location in which to perform the
 scanning of the environment and computing the path to this position exploiting
 the RTT* algorithm. The result of this process can be observed in Figure
 \ref{fig:Roadmap_ex}. In it we can see that the occupancy map has been
@@ -531,7 +533,7 @@ In the creation of this filter we used as measurement function the input
 itself, while for the state transition function we adopted the Differential
 Drive kinematic model, lastly for the filter implementation we trusted the
 Matlab implementation. The results in using these settings are as shown
-in Figures \ref{fig:EKF_off} and \ref{fig:EKF_on}.
+in Figures \ref{fig:EKF_off}, \ref{fig:EKF_on} and \ref{fig:EKF_bad}.
 The tests have been carried out on a custom world in which to the agent was
 required to follow a path made up of some waypoints, the orange triangles, with
 the ending location in the upper left corner.
@@ -551,18 +553,26 @@ the ending location in the upper left corner.
              blue crosses.}
     \label{fig:EKF_on}
 \end{figure}
+% \vspace{0.3cm}
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=8.5cm]{"../Report_images/Not_working_EKF_bad.png"}
+    \caption{Error in using the EKF with more waypoints.}
+    \label{fig:EKF_bad}
+\end{figure}
 \vspace{0.3cm}
 As we can observe the agent without using the Extended Kalmann Filter carries
-out its task flawless, while using it results into an overshooting of the
-target due to its mismatch between the estimated location and the real one.
+out its task flawlessly, while using it results into an overshooting of the
+target due to the mismatch between the estimated location and the real one.
 The first idea is that the filter has fitted only a straight line which
-departs from the orientation of the robot when it enters in the area without
+departs from the orientation of the robot when it enters the area without
 GPS. We firstly supposed that this behaviour was due to a poor tuning of the
 filter parameters, especially of the process noise matrix which has an 
-mportant role in fitting non-linearities, but after several test the
-results were not getting any better. On the other hand using only the
-kinematic model which composes the state transition function will lead
-to good results.
+important role in fitting non-linearities, but after several test the
+results were not getting any better.
+In the latter image it is possible to notice how the filter fails multiple
+times in reaching the goal point even after the corrections performed
+outside the area without GPS.
 
 \section{Conclusions}
 In this report we have presented a solution to perform the Disributed SLAM
@@ -600,13 +610,13 @@ more data in despite of the memory requirements and time for the mapping.
 \subsection{Future Directions}
 % Considerations about using the intensity of the lidar beams -> water
 In the future it should be taken into consideration the presence of water
-basins, ponds or any other elements containing water in the surroundings which
+basins, ponds or any other elements containing water in the surroundings, which
 may be seen as flat surfaces by the laser inside the Lidar, due to the highly
-reflectance of the water. Knowing this it should be possible to detect the
-threat represented by the water by analyzing the intensity of the beam
+reflectance of the water. Knowing this, it should be possible to detect the
+threat represented by the water through an analysis the intensity of the beam
 returned to the sensor.
 Another expansion for this project could be the definition of more advanced
-classification algorithms to detect the points representing ground, maybe
+classification algorithms to detect the points representing the ground, maybe
 using SVM or other machine learning techinques for classification.
 In the end a fix to the Extended Kalmann Filter estimation or an
 alternative solution must be explored.
