@@ -1,5 +1,5 @@
-# Distributed_Slam
-**Goal**: Perform distributed slam using ROS, Gazebo and Matlab.
+# Distributed_Mapping
+**Goal**: Perform distributed mapping using ROS, Gazebo and Matlab.
 
 ## Environment
 This work focuses in tacckling the issue of performing distributed slamming in 
